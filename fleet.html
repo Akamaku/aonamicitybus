@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>車両紹介 | 青波シティバス</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .fleet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding:16px}
+    .fleet-card{border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff;text-align:center}
+    .fleet-card img{width:100%;height:auto;border-radius:8px;margin-bottom:8px}
+  </style>
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html"><span class="brand-logo">🚌</span><span class="brand-text">青波シティバス</span></a>
+  <nav class="site-nav">
+    <a href="routes.html">路線図</a>
+    <a href="fares.html">運賃</a>
+    <a href="guide.html">ご利用案内</a>
+    <a href="news.html">お知らせ</a>
+    <a href="fleet.html" aria-current="page">車両紹介</a>
+  </nav>
+</header>
+
+<main>
+  <h1>車両紹介（メーカー別）</h1>
+  <div class="fleet-grid">
+    <div class="fleet-card">
+      <a href="fleet_isuzu.html"><img src="assets/kllv.png" alt="いすゞ車両"></a>
+      <h2><a href="fleet_isuzu.html">いすゞ自動車</a></h2>
+    </div>
+    <div class="fleet-card">
+      <a href="fleet_fuso.html"><img src="assets/PAMK27FH.png" alt="三菱ふそう車両"></a>
+      <h2><a href="fleet_fuso.html">三菱ふそう</a></h2>
+    </div>
+    <div class="fleet-card">
+      <a href="fleet_hino.html"><img src="assets/PKHR.png" alt="日野車両"></a>
+      <h2><a href="fleet_hino.html">日野自動車</a></h2>
+    </div>
+    <div class="fleet-card">
+  <a href="fleet_nissan.html"><img src="assets/klua.png" alt="日産ディーゼル車両"></a>
+  <h2><a href="fleet_nissan.html">日産ディーゼル</a></h2>
+</div>
+    <div class="fleet-card">
+  <a href="fleet_KCIS.html"><img src="assets/KCIS.png" alt="KCIS車両"></a>
+  <h2><a href="fleet_KCIS.html">KCIS</a></h2>
+</div>
+  </div>
+</main>
+
+<footer class="site-footer"><p>&copy; 2025 青波シティバス</p></footer>
+</body>
+</html>
