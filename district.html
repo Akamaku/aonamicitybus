@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>地区別路線図 | 青波シティバス</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .breadcrumb{font-size:.95rem;color:#555;margin:8px 0 16px}
+    .map{max-width:100%;height:auto;border:1px solid var(--border);border-radius:8px;margin:8px 0 24px}
+  </style>
+  <script>
+    const NAMES = {
+      chashina: '茶志内地区',
+      midorigaoka: '緑ヶ丘地区',
+      takanawa: '高輪地区',
+      asahigaoka: '朝日ヶ丘地区',
+      aonami: '青波地区'
+    };
+    function getParam(key){
+      const p=new URLSearchParams(location.search);
+      return p.get(key)||'';
+    }
+    function init(){
+      const key = getParam('d') || 'chashina';
+      const name = NAMES[key] || '不明な地区';
+      document.getElementById('district-name').textContent = name;
+      const img = document.getElementById('district-map');
+      img.src = `assets/map_${key}.png`;
+      img.alt = `${name} 路線図`;
+      img.onerror = () => {
+        img.replaceWith(document.createTextNode('準備中'));
+      };
+      document.title = `${name} | 青波シティバス`;
+    }
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html"><span class="brand-logo">🚌</span><span class="brand-text">青波シティバス</span></a>
+  <nav class="site-nav">
+    <a href="routes.html">路線図</a>
+    <a href="fares.html">運賃</a>
+    <a href="guide.html">ご利用案内</a>
+    <a href="news.html">お知らせ</a>
+  </nav>
+</header>
+
+<main>
+  <nav class="breadcrumb"><a href="routes.html">路線図一覧</a> ＞ <span id="district-name">—</span></nav>
+  <h1 id="district-name">—</h1>
+
+  <img id="district-map" class="map" src="" alt="">
+</main>
+
+<footer class="site-footer"><p>&copy; 2025 青波シティバス</p></footer>
+</body>
+</html>
