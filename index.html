@@ -58,22 +58,4 @@
   </nav>
 </footer>
 </body>
-<div id="counter">訪問数: 読み込み中...</div>
-
-<script>
-  // 一意のキーを設定（例: aonami-city-bus）
-  const NAMESPACE = "aonami-city-bus";
-  const KEY = "visit-counter";
-
-  fetch(`https://api.countapi.xyz/hit/${NAMESPACE}/${KEY}`)
-    .then(res => res.json())
-    .then(data => {
-      document.getElementById("counter").textContent =
-        "訪問数: " + data.value + " 回";
-    })
-    .catch(() => {
-      document.getElementById("counter").textContent = "カウンター取得失敗";
-    });
-</script>
-
 </html>
