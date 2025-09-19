@@ -29,4 +29,37 @@ a:hover{text-decoration:underline}
   width: 100%;       /* 親要素に合わせて縮む */
   height: auto;      /* 縦横比を保持 */
 }
+/* カード配置 */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  padding: 20px;
+  align-items: stretch; /* 高さを揃える */
+}
 
+/* カード本体 */
+.card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 220px; /* ←高さを統一 */
+}
+
+/* スマホでは縦並び */
+@media (max-width: 768px) {
+  .cards {
+    grid-template-columns: 1fr; /* 1列表示 */
+  }
+  .card {
+    min-height: 200px; /* スマホでも高さを揃える */
+  }
+}
+
+body {
+  font-family: 'BIZ UDP Gothic', 'ヒラギノ角ゴ ProN', 'Yu Gothic UI', sans-serif;
+}
