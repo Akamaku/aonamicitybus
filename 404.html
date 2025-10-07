@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ページが見つかりませんでした</title>
+  <script>
+    function redirect() {
+      // トップページへ移動
+      window.location.href = "https://aonamicitybus.jp";
+    }
+  </script>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      margin-top: 80px;
+      line-height: 1.8;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .go {
+      background: #0078D7;
+      color: white;
+    }
+    .stay {
+      background: #e0e0e0;
+      color: black;
+    }
+  </style>
+</head>
+<body>
+  <h1>404NOTFOUND</h1>
+  <p>ページが見つかりませんでした。</p>
+  <p>以下のボタンから選んでください。</p>
+  <button class="go" onclick="redirect()">ホームに戻る</button>
+  <button class="stay" onclick="alert('このページをそのままご利用ください')">このページにとどまる</button>
+</body>
+</html>
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDP+Gothic&display=swap" rel="stylesheet">
