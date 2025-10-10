@@ -4,10 +4,32 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ご利用案内 | 青波シティバス</title>
-  
   <link rel="stylesheet" href="styles.css">
-  
   <link href="https://fonts.googleapis.com/css2?family=BIZ+UDP+Gothic&display=swap" rel="stylesheet">
+  <style>
+    form {
+      max-width: 640px;
+      background: #fff;
+      padding: 20px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      margin-top: 20px;
+      font-family: "BIZ UDP Gothic", sans-serif;
+    }
+    label {display:block;margin-top:14px;font-weight:bold}
+    input,textarea,select{
+      width:100%;padding:8px;margin-top:5px;
+      border:1px solid #ccc;border-radius:4px;
+      box-sizing:border-box;font-family:inherit;
+    }
+    .radio label{margin-right:15px;font-weight:normal}
+    button{
+      background:#c00;color:#fff;border:none;
+      padding:10px 25px;margin-top:20px;
+      border-radius:4px;cursor:pointer;font-size:1em;
+    }
+    button:hover{background:#900}
+  </style>
 </head>
 <body>
 <header class="site-header">
@@ -25,23 +47,58 @@
   </nav>
 </header>
 
-
 <main>
   <h1>ご利用案内</h1>
+
   <h2 id="privacy">プライバシー</h2>
   <p>当サイトはアクセス解析にCookieを使用しません。お問い合わせ時のみ個人情報をお預かりします。</p>
 
-  <h2 id="contact">お問い合わせ(クレーム・ご意見・広告掲示希望等)</h2>
-  <p>いただきましたご意見、クレームの一部は公開させていただきます。</p>
-  
-  <p class="contact-info">青波シティバス お客様センター（平日9:00–18:00）<br>
-  TEL: 090-◇〇▲▽-×□●■ / Mail: <a href="mailto:aonami.citybus@gmail.com">aonami.citybus@gmail.com</a> / 
-  <br>Discord：<a href="https://discord.gg/znctnYvA3v" target="_blank">https://discord.gg/znctnYvA3v</a>
-  <br>公式X：<a href="https://x.com/Aonami_City_Bus" target="_blank">https://x.com/Aonami_City_Bus</a> 公式Instagram：<a href="https://instagram.com/aonami.city.bus" target="_blank">https://instagram.com/aonami.city.bus</a></p>
+  <h2 id="contact">お問い合わせ（ご意見・忘れ物・広告掲示希望など）</h2>
+  <p>青波シティバス お客様センター（平日9:00–18:00）<br>
+  TEL: 090-◇〇▲▽-×□●■ / Mail: aonami.citybus@gmail.com<br>
+  Discord：<a href="https://discord.gg/znctnYvA3v" target="_blank">こちら</a><br>
+  公式X：<a href="https://x.com/Aonami_City_Bus" target="_blank">@Aonami_City_Bus</a> /
+  公式Instagram：<a href="https://instagram.com/aonami.city.bus" target="_blank">@aonami.city.bus</a></p>
 
-  
-  </main>
+  <h3>お問い合わせフォーム</h3>
+  <p>下記フォームからもお問い合わせいただけます。</p>
 
-<footer class="site-footer"><p>&copy; 2025 青波シティバス</p></footer>
+  <form action="https://formspree.io/f/xxxxxxxx" method="POST">
+    <label>お名前（必須）</label>
+    <input type="text" name="name" required>
+
+    <label>メールアドレス（必須）</label>
+    <input type="email" name="email" required>
+
+    <label>電話番号</label>
+    <input type="tel" name="phone">
+
+    <label>お問い合わせ区分（必須）</label>
+    <select name="category" required>
+      <option value="">選択してください</option>
+      <option value="忘れ物">忘れ物について</option>
+      <option value="お問い合わせ">その他のお問い合わせ</option>
+    </select>
+
+    <label>車両番号（わかる場合のみ）</label>
+    <input type="text" name="bus_number" placeholder="例）京都200か2304／6290など">
+
+    <label>返信が必要ですか？（必須）</label>
+    <div class="radio">
+      <label><input type="radio" name="reply_needed" value="必要" required>必要</label>
+      <label><input type="radio" name="reply_needed" value="不要">不要</label>
+    </div>
+
+    <label>お問い合わせ内容（必須）</label>
+    <textarea name="message" rows="6" required></textarea>
+
+    <button type="submit">送信する</button>
+  </form>
+
+</main>
+
+<footer class="site-footer">
+  <p>&copy; 2025 青波シティバス</p>
+</footer>
 </body>
 </html>
