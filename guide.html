@@ -95,6 +95,33 @@
     <button type="submit">送信する</button>
   </form>
 
+  <script>
+  const FORMSPREE_ENDPOINT = "https://formspree.io/f/xblzzolg";
+
+  const form = document.getElementById("contact-form");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+
+    try {
+      const res = await fetch(FORMSPREE_ENDPOINT, {
+        method: "POST",
+        body: data,
+        headers: { "Accept": "application/json" }
+      });
+
+      if (res.ok) {
+        // 送信成功 → サイトと同じデザインの完了ページへ
+        window.location.href = "thanks.html";
+      } else {
+        alert("送信に失敗しました。時間をおいて再度お試しください。");
+      }
+    } catch (err) {
+      alert("通信エラーが発生しました。ネットワークをご確認ください。");
+    }
+  });
+</script>
+
 </main>
 
 <footer class="site-footer">
