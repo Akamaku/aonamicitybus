@@ -93,3 +93,11 @@ body {
 #notice button:hover {
   color: red;
 }
+.ad-type img{
+  width:100%;
+  max-width:500px;
+  height:auto;
+  display:block;
+  margin:10px 0;       /* 上下だけ余白、左寄せ */
+  border-radius:8px;
+}
