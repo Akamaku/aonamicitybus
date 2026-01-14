@@ -1,1 +1,195 @@
-index.html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>バス放送システム</title>
+  <style>
+    @font-face {
+      font-family: 'DisplayFreeTFB';
+      src: url('DISPLAY FREE TFB.ttf') format('truetype');
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      font-family: sans-serif;
+      background: #d0d6de;
+      display: flex; justify-content: center; align-items: center; min-height: 100vh;
+    }
+    .panel {
+      width: 360px; height: 640px;
+      background: #e5eaef; border-radius: 24px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+      position: relative; padding: 16px; overflow: hidden;
+    }
+    .display-area {
+      position: absolute; top: 30px; left: 50%; transform: translateX(-50%);
+      width: 80%; height: 70px; background: #222; border-radius: 8px;
+      color: #0f0; display: flex; align-items: center; justify-content: center;
+      font-family: 'DisplayFreeTFB', monospace;
+      font-size: 22px; letter-spacing: 0.1em; text-align: center; padding: 0 10px;
+    }
+    .input-area {
+      position: absolute; top: 115px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; align-items: center;
+    }
+    .input-area input { width: 100px; padding: 6px; font-size: 16px; text-align: center; border-radius: 6px; border: 1px solid #aaa; }
+    .input-area button { padding: 6px 12px; background: #4a4a4a; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+
+    .circle-btn-big {
+      width: 160px; height: 160px; border-radius: 50%; border: none;
+      background: #e44141; color: #fff; font-size: 24px;
+      letter-spacing: 0.2em; cursor: pointer;
+      position: absolute; top: 185px; left: 50%; transform: translateX(-50%);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.35);
+      z-index: 2;
+    }
+    .circle-btn-big:active { transform: translateX(-50%) scale(0.96); }
+
+    .btn-side {
+      width: 55px; height: 55px;
+      border-radius: 50%; border: none;
+      color: #fff; font-size: 11px; cursor: pointer;
+      position: absolute; 
+      bottom: 145px; /* 配置場所は維持 */
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    .btn-back-manual { background: #555; left: 100px; }
+    .btn-stop-manual { background: #222; right: 100px; }
+
+    .start-label { position: absolute; top: 355px; left: 50%; transform: translateX(-50%); font-size: 18px; letter-spacing: 0.4em; }
+    
+    .footer-bar { position: absolute; bottom: 0; left: 0; width: 100%; height: 48px; background: #3b7dff; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="display-area" id="display">----</div>
+    <div class="input-area">
+      <input id="routeIn" type="text" value="" placeholder="系統入力" maxlength="4" />
+      <button onclick="setRoute()">設定</button>
+    </div>
+
+    <button class="circle-btn-big" id="mainButton" onclick="next()">始動<br>(Enter)</button>
+    <div class="start-label">放送送り</div>
+
+    <button class="btn-side btn-back-manual" onclick="prev()">戻し</button>
+    <button class="btn-side btn-stop-manual" onclick="stopBroadcasting()">停止</button>
+
+    <div class="footer-bar" id="status">系統待機中</div>
+  </div>
+
+  <script>
+    let routeData = {
+      "181": [
+        "181確認.flac", "00-田原台往路.wav", "01-田原台往路.wav", "02-田原台往路.wav", "03-田原台往路.wav",
+        "04-田原台往路.wav", "05-田原台往路.wav", "06-田原台往路.wav", "07-田原台往路.wav", "08-田原台往路.wav",
+        "09-田原台往路.wav", "10-田原台往路.wav", "11-田原台往路.wav", "12-田原台往路.wav", "13-田原台往路.wav",
+        "14-田原台往路.wav", "15-田原台往路.wav", "16-田原台往路.wav", "17-田原台往路.wav", "18-田原台往路.wav",
+        "19-田原台往路.wav", "20-田原台往路.wav", "21-田原台往路.wav", "22-田原台往路.wav", "23-田原台往路.wav",
+        "24-田原台往路.wav", "25-田原台往路.wav"
+      ],
+      "801": [       
+        "0-直通K03復路.wav", "1-直通K03復路.wav", "2-直通K03復路.wav", "3-直通K03復路.wav", "4-直通K03復路.wav"
+      ],
+       "260": [       
+        "0-直通22.m4a", "1-直通22.wav"
+      ]
+    };
+
+    let currentRoute = [];
+    let currentIndex = -2;
+    let currentSystemNum = "";
+    let player = new Audio();
+
+    function updateDisplay() {
+      const displayElement = document.getElementById("display");
+      if (currentIndex === -2) displayElement.textContent = "----";
+      else if (currentIndex === -1) displayElement.textContent = "OK";
+      else displayElement.textContent = `${currentSystemNum} ${currentIndex}`;
+    }
+
+    function setRoute() {
+      const id = document.getElementById("routeIn").value.trim();
+      if (routeData[id]) {
+        player.pause();
+        currentSystemNum = id;
+        currentRoute = routeData[id];
+        currentIndex = -1;
+        document.getElementById("status").textContent = `系統：${id} 設定完了`;
+        updateDisplay();
+        document.getElementById("routeIn").blur();
+      } else {
+        alert("系統 " + id + " が見つかりません。");
+      }
+    }
+
+    function next() {
+      if (currentRoute.length === 0) return;
+
+      // 181番限定スキップ処理 (再生中の場合)
+      if (currentSystemNum === "181" && !player.paused) {
+        if (currentIndex === 1 || currentIndex === 8) {
+          if (currentIndex < currentRoute.length - 2) {
+            currentIndex += 2;
+            updateDisplay();
+            play(currentRoute[currentIndex]);
+            return;
+          }
+        }
+      }
+
+      // 通常の進行（停止中であれば次の放送に進む）
+      if (currentIndex < currentRoute.length - 1) {
+        currentIndex++;
+        updateDisplay();
+        play(currentRoute[currentIndex]);
+      } else {
+        document.getElementById("display").textContent = "END";
+      }
+    }
+
+    function prev() {
+      if (currentRoute.length === 0 || currentIndex <= 0) return;
+      stopBroadcasting();
+      currentIndex--;
+      updateDisplay();
+      play(currentRoute[currentIndex]);
+    }
+
+    function stopBroadcasting() {
+      if (player) {
+        player.pause();
+        player.onended = null;
+      }
+    }
+
+    function setAutoNext() {
+      player.onended = () => {
+        if (currentSystemNum === "181" && (currentIndex === 1 || currentIndex === 9)) {
+          next();
+        }
+      };
+    }
+
+    function play(fileName) {
+      player.pause();
+      player.onended = null; 
+      player.src = `voice/${fileName}`;
+      player.load();
+      setAutoNext();
+      player.play().catch(e => console.error("再生失敗:", fileName, e));
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (document.activeElement.tagName === 'INPUT') {
+        if (e.key === "Enter") setRoute();
+        return;
+      }
+      if (e.key === "Enter") { e.preventDefault(); next(); }
+      if (e.key === "Backspace") { e.preventDefault(); prev(); }
+      if (e.key === " ") { e.preventDefault(); stopBroadcasting(); }
+      // 数字キーによる啓発放送のイベントリスナーも削除
+    });
+  </script>
+</body>
+</html>
