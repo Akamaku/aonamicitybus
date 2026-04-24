@@ -197,12 +197,6 @@ input[type=password]:focus{border-color:#F26F21}
         </div>
       </div>
 
-      <div class="form-group">
-        <label for="email-in">メールアドレス</label>
-        <input type="email" id="email-in" placeholder="example@mail.com" autocomplete="email">
-        <div class="hint">発車5分前にお知らせメールを送ります</div>
-      </div>
-
       <button class="submit-btn" id="reg-btn" disabled>登録する</button>
     </div>
 
@@ -355,10 +349,8 @@ stopSel.addEventListener('change', () => {
   checkBtn();
 });
 
-document.getElementById('email-in').addEventListener('input', checkBtn);
-
 function checkBtn(){
-  const ok = stopSel.value && selectedTime && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(document.getElementById('email-in').value);
+  const ok = stopSel.value && selectedTime && !!authedEmail;
   document.getElementById('reg-btn').disabled = !ok;
 }
 
@@ -366,9 +358,9 @@ function checkBtn(){
 document.getElementById('reg-btn').addEventListener('click', async () => {
   const stop  = stopSel.value;
   const time  = selectedTime;
-  const email = document.getElementById('email-in').value.trim();
+  const email = authedEmail;
   const days  = [...document.querySelectorAll('.day-btn.active')].map(b => b.dataset.day);
-  if (!stop || !time || !email) return;
+  if (!stop || !time || !email) { showToast('ログインが必要です'); return; }
 
   // 重複チェック（キャッシュ）
   if (regCache.some(r => r.stop===stop && r.time===time && r.email===email)) {
@@ -401,7 +393,6 @@ document.getElementById('reg-btn').addEventListener('click', async () => {
   stopSel.value = '';
   document.getElementById('time-group').style.display = 'none';
   document.getElementById('general-note').style.display = 'none';
-  document.getElementById('email-in').value = '';
   selectedTime = null;
   selectedBusIdx = -1;
   checkBtn();
