@@ -83,6 +83,32 @@ select:focus,input[type=email]:focus{border-color:#F26F21}
   opacity:0;transition:opacity .3s;pointer-events:none;z-index:99;
 }
 .toast.show{opacity:1}
+
+/* 認証フォーム */
+.auth-card{background:#fff;border-radius:14px;border:1.5px solid #e8e6e0;padding:1.25rem;margin-bottom:1rem}
+.auth-card .section-head{margin-bottom:.75rem}
+input[type=password]{
+  width:100%;padding:10px 12px;font-size:15px;
+  border:1.5px solid #e0deda;border-radius:9px;
+  background:#fff;color:#1a1a1a;outline:none;font-family:inherit;
+}
+input[type=password]:focus{border-color:#F26F21}
+.auth-btn{
+  width:100%;padding:11px;font-size:15px;font-weight:700;
+  border:none;border-radius:9px;background:#F26F21;color:#fff;
+  cursor:pointer;font-family:inherit;margin-top:.75rem;
+  transition:background .15s;
+}
+.auth-btn:hover{background:#d45e15}
+.auth-btn:disabled{background:#e0deda;color:#aaa;cursor:default}
+.auth-error{font-size:12px;color:#C0392B;margin-top:.4rem;display:none}
+.auth-ok-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  background:#FFF8F4;border:1.5px solid #FDDCC7;border-radius:10px;
+  padding:.6rem 1rem;margin-bottom:.75rem;font-size:13px;color:#888;
+}
+.auth-ok-bar strong{color:#F26F21}
+.signout-btn{font-size:12px;color:#C0392B;background:none;border:none;cursor:pointer;font-family:inherit;padding:0}
 </style>
 </head>
 <body>
@@ -94,41 +120,64 @@ select:focus,input[type=email]:focus{border-color:#F26F21}
 
 <div class="wrap">
 
-  <!-- 登録フォーム -->
-  <div class="card">
-    <div class="section-head">新規登録</div>
-
+  <!-- ログインフォーム（未認証時） -->
+  <div class="auth-card" id="auth-form">
+    <div class="section-head">ログイン</div>
     <div class="form-group">
-      <label for="stop-sel">乗車停留所</label>
-      <select id="stop-sel">
-        <option value="">停留所を選択してください</option>
-      </select>
+      <label for="auth-email">メールアドレス</label>
+      <input type="email" id="auth-email" placeholder="登録に使ったメールアドレス" autocomplete="email">
     </div>
-
-    <div class="form-group" id="time-group" style="display:none">
-      <label>便（発車時刻）</label>
-      <div class="time-list" id="time-list"></div>
-      <div class="hint">乗りたい便をタップして選択</div>
-      <div id="general-note" style="display:none;align-items:center;gap:6px;background:#FFF8E6;border:1.5px solid #FFDDA0;border-radius:8px;padding:7px 10px;margin-top:6px;font-size:12px;color:#8A5C00;">
-        <span style="font-size:14px;">⚠️</span>
-        <span>この便は<strong>一般車による運行</strong>です。車両・設備が通常と異なる場合があります。</span>
-      </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label for="auth-pass">パスワード</label>
+      <input type="password" id="auth-pass" placeholder="パスワードを入力">
+      <div class="auth-error" id="auth-error"></div>
     </div>
-
-    <div class="form-group">
-      <label for="email-in">メールアドレス</label>
-      <input type="email" id="email-in" placeholder="example@mail.com" autocomplete="email">
-      <div class="hint">発車5分前にお知らせメールを送ります</div>
-    </div>
-
-    <button class="submit-btn" id="reg-btn" disabled>登録する</button>
+    <button class="auth-btn" id="auth-btn">確認する</button>
   </div>
 
-  <!-- 登録済み一覧 -->
-  <div class="section-head" style="margin-top:.5rem">登録済み案内</div>
-  <div class="card" style="padding:1rem">
-    <div class="reg-list" id="reg-list">
-      <div class="empty-msg" id="empty-msg">登録された案内はありません</div>
+  <!-- 認証済み表示（認証後に表示） -->
+  <div id="reg-section" style="display:none">
+    <div class="auth-ok-bar">
+      <span><strong id="auth-email-disp"></strong> でログイン中</span>
+      <button class="signout-btn" id="signout-btn">ログアウト</button>
+    </div>
+
+    <!-- 新規登録フォーム -->
+    <div class="card">
+      <div class="section-head">新規登録</div>
+
+      <div class="form-group">
+        <label for="stop-sel">乗車停留所</label>
+        <select id="stop-sel">
+          <option value="">停留所を選択してください</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="time-group" style="display:none">
+        <label>便（発車時刻）</label>
+        <div class="time-list" id="time-list"></div>
+        <div class="hint">乗りたい便をタップして選択</div>
+        <div id="general-note" style="display:none;align-items:center;gap:6px;background:#FFF8E6;border:1.5px solid #FFDDA0;border-radius:8px;padding:7px 10px;margin-top:6px;font-size:12px;color:#8A5C00;">
+          <span style="font-size:14px;">⚠️</span>
+          <span>この便は<strong>一般車による運行</strong>です。車両・設備が通常と異なる場合があります。</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="email-in">メールアドレス</label>
+        <input type="email" id="email-in" placeholder="example@mail.com" autocomplete="email">
+        <div class="hint">発車5分前にお知らせメールを送ります</div>
+      </div>
+
+      <button class="submit-btn" id="reg-btn" disabled>登録する</button>
+    </div>
+
+    <!-- 登録済み一覧 -->
+    <div class="section-head" style="margin-top:.5rem">登録済み案内</div>
+    <div class="card" style="padding:1rem">
+      <div class="reg-list" id="reg-list">
+        <div class="empty-msg">読み込み中…</div>
+      </div>
     </div>
   </div>
 
@@ -326,13 +375,17 @@ document.getElementById('reg-btn').addEventListener('click', async () => {
 
 
 
-/* 登録済みリスト：GASから取得して描画 */
+/* 認証状態 */
+let authedEmail = null;
+
+/* 登録済みリスト：認証済みメールのみ取得 */
 async function loadRegList() {
+  if (!authedEmail) return;
   const list = document.getElementById('reg-list');
   list.innerHTML = '<div class="empty-msg">読み込み中…</div>';
   try {
-    const json = await gasCall({ action: 'list' });
-    regCache = json.list || [];
+    const json = await gasCall({ action: 'list', email: authedEmail });
+    regCache = (json.list || []).filter(r => r.email === authedEmail);
     renderRegList(regCache);
   } catch(e) {
     list.innerHTML = '<div class="empty-msg">読み込みに失敗しました</div>';
@@ -392,8 +445,60 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-/* 起動時：GASから登録一覧を取得 */
-loadRegList();
+/* 認証ボタン */
+document.getElementById('auth-btn').addEventListener('click', async () => {
+  const email = document.getElementById('auth-email').value.trim();
+  const pass  = document.getElementById('auth-pass').value;
+  const errEl = document.getElementById('auth-error');
+  const btn   = document.getElementById('auth-btn');
+  if (!email || !pass) return;
+
+  btn.disabled = true;
+  btn.textContent = '確認中…';
+  errEl.style.display = 'none';
+
+  try {
+    const json = await gasCall({ action: 'auth', email, pass });
+    if (json.ok) {
+      authedEmail = email;
+      document.getElementById('auth-form').style.display = 'none';
+      document.getElementById('reg-section').style.display = 'block';
+      document.getElementById('auth-email-disp').textContent = email;
+      await loadRegList();
+    } else {
+      if (json.reason === 'not_found') {
+        errEl.textContent = 'このメールアドレスは登録されていません';
+      } else {
+        errEl.textContent = 'パスワードが違います';
+      }
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = '通信エラーが発生しました';
+    errEl.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btn.textContent = '確認する';
+});
+
+/* Enterキーでログイン */
+['auth-email','auth-pass'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('auth-btn').click();
+  });
+});
+
+/* ログアウト */
+document.getElementById('signout-btn').addEventListener('click', () => {
+  authedEmail = null;
+  regCache = [];
+  document.getElementById('auth-form').style.display = 'block';
+  document.getElementById('reg-section').style.display = 'none';
+  document.getElementById('auth-email').value = '';
+  document.getElementById('auth-pass').value = '';
+  document.getElementById('auth-error').style.display = 'none';
+});
 </script>
 </body>
 </html>
