@@ -109,6 +109,11 @@ input[type=password]:focus{border-color:#F26F21}
 }
 .auth-ok-bar strong{color:#F26F21}
 .signout-btn{font-size:12px;color:#C0392B;background:none;border:none;cursor:pointer;font-family:inherit;padding:0}
+.tab-row{display:flex;gap:0;margin-bottom:1rem;border-radius:10px;overflow:hidden;border:1.5px solid #e8e6e0}
+.tab-row button{flex:1;padding:10px;font-size:14px;font-weight:600;border:none;background:#fff;color:#888;cursor:pointer;font-family:inherit;transition:background .1s,color .1s}
+.tab-row button.active{background:#F26F21;color:#fff}
+.tab-row button:not(.active):hover{background:#FFF0E6;color:#F26F21}
+.pass-hint{font-size:11px;color:#aaa;margin-top:.25rem}
 </style>
 </head>
 <body>
@@ -120,19 +125,48 @@ input[type=password]:focus{border-color:#F26F21}
 
 <div class="wrap">
 
-  <!-- ログインフォーム（未認証時） -->
+  <!-- ログイン / アカウント登録フォーム（未認証時） -->
   <div class="auth-card" id="auth-form">
-    <div class="section-head">ログイン</div>
-    <div class="form-group">
-      <label for="auth-email">メールアドレス</label>
-      <input type="email" id="auth-email" placeholder="登録に使ったメールアドレス" autocomplete="email">
+
+    <!-- タブ切り替え -->
+    <div class="tab-row">
+      <button id="tab-login" class="active" onclick="switchAuthTab('login')">ログイン</button>
+      <button id="tab-signup" onclick="switchAuthTab('signup')">新規アカウント登録</button>
     </div>
-    <div class="form-group" style="margin-bottom:0">
-      <label for="auth-pass">パスワード</label>
-      <input type="password" id="auth-pass" placeholder="パスワードを入力">
-      <div class="auth-error" id="auth-error"></div>
+
+    <!-- ログインパネル -->
+    <div id="panel-login">
+      <div class="form-group">
+        <label for="auth-email">メールアドレス</label>
+        <input type="email" id="auth-email" placeholder="登録済みのメールアドレス" autocomplete="email">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label for="auth-pass">パスワード</label>
+        <input type="password" id="auth-pass" placeholder="パスワードを入力">
+        <div class="auth-error" id="auth-error"></div>
+      </div>
+      <button class="auth-btn" id="auth-btn">ログイン</button>
     </div>
-    <button class="auth-btn" id="auth-btn">確認する</button>
+
+    <!-- 新規アカウント登録パネル -->
+    <div id="panel-signup" style="display:none">
+      <div class="form-group">
+        <label for="signup-email">メールアドレス</label>
+        <input type="email" id="signup-email" placeholder="example@mail.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="signup-pass">パスワード（8文字以上）</label>
+        <input type="password" id="signup-pass" placeholder="パスワードを設定">
+        <div class="pass-hint">英数字・記号が使えます</div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label for="signup-pass2">パスワード（確認）</label>
+        <input type="password" id="signup-pass2" placeholder="もう一度入力">
+        <div class="auth-error" id="signup-error"></div>
+      </div>
+      <button class="auth-btn" id="signup-btn">アカウントを作成</button>
+    </div>
+
   </div>
 
   <!-- 認証済み表示（認証後に表示） -->
@@ -444,6 +478,73 @@ function showToast(msg) {
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3000);
 }
+
+/* タブ切り替え */
+function switchAuthTab(tab) {
+  document.getElementById('panel-login').style.display  = tab === 'login'  ? 'block' : 'none';
+  document.getElementById('panel-signup').style.display = tab === 'signup' ? 'block' : 'none';
+  document.getElementById('tab-login').classList.toggle('active',  tab === 'login');
+  document.getElementById('tab-signup').classList.toggle('active', tab === 'signup');
+  document.getElementById('auth-error').style.display   = 'none';
+  document.getElementById('signup-error').style.display = 'none';
+}
+
+/* アカウント登録ボタン */
+document.getElementById('signup-btn').addEventListener('click', async () => {
+  const email  = document.getElementById('signup-email').value.trim();
+  const pass   = document.getElementById('signup-pass').value;
+  const pass2  = document.getElementById('signup-pass2').value;
+  const errEl  = document.getElementById('signup-error');
+  const btn    = document.getElementById('signup-btn');
+
+  errEl.style.display = 'none';
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errEl.textContent = '正しいメールアドレスを入力してください';
+    errEl.style.display = 'block'; return;
+  }
+  if (pass.length < 8) {
+    errEl.textContent = 'パスワードは8文字以上にしてください';
+    errEl.style.display = 'block'; return;
+  }
+  if (pass !== pass2) {
+    errEl.textContent = 'パスワードが一致しません';
+    errEl.style.display = 'block'; return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '登録中…';
+
+  try {
+    const json = await gasCall({ action: 'signup', email, pass });
+    if (json.ok) {
+      showToast('アカウントを作成しました。ログインしてください');
+      document.getElementById('signup-email').value = '';
+      document.getElementById('signup-pass').value  = '';
+      document.getElementById('signup-pass2').value = '';
+      // ログインタブに自動切り替え＆メールアドレスをセット
+      switchAuthTab('login');
+      document.getElementById('auth-email').value = email;
+      document.getElementById('auth-pass').focus();
+    } else {
+      errEl.textContent = json.error || '登録に失敗しました';
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = '通信エラーが発生しました';
+    errEl.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'アカウントを作成';
+});
+
+/* Enterキーでアカウント登録 */
+['signup-email','signup-pass','signup-pass2'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('signup-btn').click();
+  });
+});
 
 /* 認証ボタン */
 document.getElementById('auth-btn').addEventListener('click', async () => {
