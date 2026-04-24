@@ -197,7 +197,7 @@ const TIMETABLE = {
 function timeToMins(t){const[h,m]=t.split(':').map(Number);return h*60+m;}
 function getNow(){const n=new Date();return n.getHours()*60+n.getMinutes()+n.getSeconds()/60;}
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbykKgcGCuLx_ZwkweklOuEe8V5-SkBZLf_VHr_lnQQcSDCASyliDRKQf8w9is7hMHle/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzUSWqxX6CLS-2ebkytQZfM4QZ_ffYLQCoP2yXO-siNXOHIKB82PPnfR47b2jvkeaaW/exec';
 
 /* GAS API 呼び出し共通 */
 async function gasCall(payload) {
