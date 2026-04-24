@@ -132,13 +132,7 @@ select:focus,input[type=email]:focus{border-color:#F26F21}
     </div>
   </div>
 
-  <!-- メール機能の説明 -->
-  <div style="background:#FFF8F4;border:1.5px solid #FDDCC7;border-radius:12px;padding:1rem;font-size:12px;color:#888;line-height:1.7">
-    <strong style="color:#F26F21;display:block;margin-bottom:.25rem">&#9432; ご利用について</strong>
-    発車5分前にご登録のメールアドレスへ案内メールを送信します。<br>
-    本システムはデモ版のため、実際のメール送信には対応していません。<br>
-    実運用時はメール送信サーバーとの連携が必要です。
-  </div>
+
 
 </div>
 
@@ -203,10 +197,19 @@ const TIMETABLE = {
 function timeToMins(t){const[h,m]=t.split(':').map(Number);return h*60+m;}
 function getNow(){const n=new Date();return n.getHours()*60+n.getMinutes()+n.getSeconds()/60;}
 
-/* 登録データ（localStorage で永続化） */
-const STORE_KEY = 'busmail_v1';
-function loadRegs(){try{return JSON.parse(localStorage.getItem(STORE_KEY)||'[]');}catch{return [];}}
-function saveRegs(a){localStorage.setItem(STORE_KEY,JSON.stringify(a));}
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbykKgcGCuLx_ZwkweklOuEe8V5-SkBZLf_VHr_lnQQcSDCASyliDRKQf8w9is7hMHle/exec';
+
+/* GAS API 呼び出し共通 */
+async function gasCall(payload) {
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+/* ローカルキャッシュ（一覧表示用） */
+let regCache = [];
 
 let selectedTime = null;
 let selectedBusIdx = -1;
@@ -277,67 +280,71 @@ function checkBtn(){
 }
 
 /* 登録ボタン */
-document.getElementById('reg-btn').addEventListener('click', () => {
+document.getElementById('reg-btn').addEventListener('click', async () => {
   const stop  = stopSel.value;
   const time  = selectedTime;
   const email = document.getElementById('email-in').value.trim();
+  const days  = [...document.querySelectorAll('.day-btn.active')].map(b => b.dataset.day);
   if (!stop || !time || !email) return;
 
-  const regs = loadRegs();
-  // 同一 stop+time+email の重複チェック
-  if (regs.some(r => r.stop===stop && r.time===time && r.email===email)) {
+  // 重複チェック（キャッシュ）
+  if (regCache.some(r => r.stop===stop && r.time===time && r.email===email)) {
     showToast('すでに同じ内容が登録されています');
     return;
   }
-  const isGeneral = new Set([62,64,66,68,70,72]).has(selectedBusIdx);
-  regs.push({id: Date.now(), stop, time, email, general: isGeneral});
-  saveRegs(regs);
-  renderRegList();
-  showToast(`${stop} ${time}発 の案内を登録しました`);
 
+  const btn = document.getElementById('reg-btn');
+  btn.disabled = true;
+  btn.textContent = '登録中…';
+
+  const isGeneral = new Set([62,64,66,68,70,72]).has(selectedBusIdx);
+  // 曜日未選択の場合は全曜日
+  const sendDays = days.length ? days : ['日','月','火','水','木','金','土'];
+
+  try {
+    const json = await gasCall({ action:'register', stop, time, email, days: sendDays, general: isGeneral });
+    if (json.ok) {
+      showToast(`${stop} ${time}発 の案内を登録しました`);
+      await loadRegList();
+    } else {
+      showToast('登録に失敗しました: ' + (json.error||''));
+    }
+  } catch(e) {
+    showToast('通信エラーが発生しました');
+  }
+
+  btn.textContent = '登録する';
   // リセット
   stopSel.value = '';
   document.getElementById('time-group').style.display = 'none';
+  document.getElementById('general-note').style.display = 'none';
   document.getElementById('email-in').value = '';
   selectedTime = null;
   selectedBusIdx = -1;
   checkBtn();
-
-  // 擬似メール送信スケジュール（発車5分前にブラウザ通知 or ログ）
-  scheduleAlert(stop, time, email);
 });
 
-/* アラートスケジュール（発車5分前） */
-function scheduleAlert(stop, time, email) {
-  const alertMins = timeToMins(time) - 5;
-  const now = getNow();
-  const diffMs = (alertMins - now) * 60 * 1000;
-  if (diffMs <= 0) return;
-  setTimeout(() => {
-    // 実際のメール送信はサーバー側が必要
-    // ここでは Notification API（許可がある場合）でデモ通知
-    const msg = `【青波シティバス】${stop} ${time}発 の便がまもなく発車します（5分前）`;
-    if (Notification && Notification.permission === 'granted') {
-      new Notification('バス発車5分前のお知らせ', {body: msg, icon: ''});
-    } else if (Notification && Notification.permission !== 'denied') {
-      Notification.requestPermission().then(p => {
-        if (p === 'granted') new Notification('バス発車5分前のお知らせ', {body: msg});
-      });
-    }
-    console.log('[メール送信]', msg, '→', email);
-  }, diffMs);
+
+
+/* 登録済みリスト：GASから取得して描画 */
+async function loadRegList() {
+  const list = document.getElementById('reg-list');
+  list.innerHTML = '<div class="empty-msg">読み込み中…</div>';
+  try {
+    const json = await gasCall({ action: 'list' });
+    regCache = json.list || [];
+    renderRegList(regCache);
+  } catch(e) {
+    list.innerHTML = '<div class="empty-msg">読み込みに失敗しました</div>';
+  }
 }
 
-/* 登録済みリスト描画 */
-function renderRegList() {
-  const regs = loadRegs();
+function renderRegList(regs) {
   const list = document.getElementById('reg-list');
-  const empty = document.getElementById('empty-msg');
-  if (!regs.length) {
+  if (!regs || !regs.length) {
     list.innerHTML = '<div class="empty-msg" id="empty-msg">登録された案内はありません</div>';
     return;
   }
-  empty && (empty.style.display = 'none');
   list.innerHTML = regs.map(r => `
     <div class="reg-item">
       <div class="reg-icon">
@@ -351,19 +358,27 @@ function renderRegList() {
       </div>
       <div class="reg-body">
         <div class="reg-title">${escH(r.stop)}　${escH(r.time)} 発</div>
-        <div class="reg-sub">${escH(r.email)}　｜　発車5分前に通知${r.general ? ' <span style="color:#E67E00;font-weight:600;">※一般車</span>' : ''}</div>
+        <div class="reg-sub">${escH(r.email)}　｜　${escH((r.days||[]).join('・'))}曜日${r.general==='true'||r.general===true?' <span style="color:#E67E00;font-weight:600;">※一般車</span>':''}</div>
       </div>
-      <button class="reg-del" data-id="${r.id}" title="案内をキャンセル">キャンセル</button>
+      <button class="reg-del" data-id="${escH(r.id)}" title="案内をキャンセル">キャンセル</button>
     </div>
   `).join('');
 
   list.querySelectorAll('.reg-del').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = parseInt(btn.dataset.id, 10);
-      const regs2 = loadRegs().filter(r => r.id !== id);
-      saveRegs(regs2);
-      renderRegList();
-      showToast('案内登録をキャンセルしました');
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const reg = regCache.find(r => String(r.id) === String(id));
+      if (!reg) return;
+      if (!confirm(`${reg.stop} ${reg.time}発 の案内登録をキャンセルしますか？`)) return;
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        await gasCall({ action: 'delete', id });
+        showToast('案内登録をキャンセルしました');
+        await loadRegList();
+      } catch(e) {
+        showToast('通信エラーが発生しました');
+      }
     });
   });
 }
@@ -377,9 +392,8 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-/* 起動時：既存登録を表示 & ページ表示時に残存タイマー再セット */
-renderRegList();
-loadRegs().forEach(r => scheduleAlert(r.stop, r.time, r.email));
+/* 起動時：GASから登録一覧を取得 */
+loadRegList();
 </script>
 </body>
 </html>
