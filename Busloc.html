@@ -591,7 +591,7 @@ function renderResult() {
   const arrivals = getArrivals(S.fromKey, S.toKey);
   const nowMins  = getNow();
   const cardsHTML = arrivals.length === 0
-    ? `<div class="no-service">🚌<br>本日の運行は終了しました<br><small style="font-size:12px;color:#ccc;">翌 7:20 より運行開始</small></div>`
+    ? `<div class="no-service"><br>本日の運行は終了しました<br></div>`
     : arrivals.map((a, i) => {
         const diff = a.diff;
         let sHtml = '', extra = '';
@@ -710,7 +710,7 @@ function renderTrip() {
       <div class="trip-badge">青波シティバス</div>
       <div>
         <div class="trip-title">${escH(LOOP_DISPLAY[LOOP_ORDER.indexOf(S.tripFrom)])} ${originTime} 発</div>
-        <div class="trip-sub">この先の到着予想時刻${[62,64,66,68,70,72].includes(S.tripBusIndex)?'　<span style="color:#E67E00;font-weight:600;">⚠️による運行</span>':''}</div>
+        <div class="trip-sub">この先の到着予想時刻${[62,64,66,68,70,72].includes(S.tripBusIndex)?'　<span style="color:#E67E00;font-weight:600;">⚠️一般車による運行</span>':''}</div>
       </div>
     </div>
     <div class="trip-list">${rows}</div>
