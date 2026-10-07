@@ -177,7 +177,14 @@
   .rtform{border:1.5px solid var(--blue-ink);border-radius:12px;padding:12px;background:#fff}
   .rtform .row{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px;margin-bottom:8px;font-size:14px}
   .rtform .row label{color:var(--ink-dim);font-weight:600}
-  .rtform select,.rtform input[type=time]{width:100%;padding:8px;border:1px solid #bcc;border-radius:6px;background:#fff;font-size:16px}
+  .rtform select,.rtform input[type=time],.rtform input[type=date],.rtform input[type=text]{width:100%;padding:8px;border:1px solid #bcc;border-radius:6px;background:#fff;font-size:16px}
+  .rtform input.bad{border-color:#d33;background:#fff4f4}
+  .sug{position:relative}
+  .suglist{position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid #bcc;border-radius:0 0 8px 8px;box-shadow:0 6px 16px rgba(0,0,0,.15);display:none;max-height:240px;overflow:auto}
+  .suglist.show{display:block}
+  .suglist div{padding:10px 12px;font-size:15px;border-bottom:1px solid var(--rule);cursor:pointer}
+  .suglist div small{color:var(--ink-dim);margin-left:8px;font-size:12px}
+  .suglist div:active,.suglist div.hi{background:var(--band)}
   .rtform .modes{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
   .rtform .modes button{border:1.5px solid var(--blue-ink);background:#fff;color:var(--blue-ink);border-radius:20px;padding:5px 12px;font-size:13px;font-weight:600}
   .rtform .modes button.on{background:var(--blue-ink);color:#fff}
@@ -269,15 +276,17 @@
   <header class="hdr"><span></span><div class="ttl"><h1>乗換案内</h1><div class="now" id="rtNow"></div></div><span></span></header>
   <div class="rt">
     <div class="rtform">
-      <div class="row"><label>出発駅</label><select id="rtFrom"></select></div>
-      <div class="row"><label>経由1</label><select id="rtVia1"></select></div>
-      <div class="row"><label>経由2</label><select id="rtVia2"></select></div>
-      <div class="row"><label>到着駅</label><select id="rtTo"></select></div>
+      <div class="row"><label>出発駅</label><div class="sug"><input type="text" id="rtFrom" placeholder="駅名を入力" autocomplete="off"><div class="suglist"></div></div></div>
+      <div class="row"><label>経由1</label><div class="sug"><input type="text" id="rtVia1" placeholder="（任意）" autocomplete="off"><div class="suglist"></div></div></div>
+      <div class="row"><label>経由2</label><div class="sug"><input type="text" id="rtVia2" placeholder="（任意）" autocomplete="off"><div class="suglist"></div></div></div>
+      <div class="row"><label>到着駅</label><div class="sug"><input type="text" id="rtTo" placeholder="駅名を入力" autocomplete="off"><div class="suglist"></div></div></div>
+      <div class="row"><label>日付</label><input type="date" id="rtDate"></div>
       <div class="modes" id="rtModes">
         <button data-m="dep" class="on">発車時刻</button><button data-m="arr">到着時刻</button>
         <button data-m="first">始発</button><button data-m="last">最終</button><button data-m="none">指定なし</button>
       </div>
       <div class="row" id="rtTimeRow"><label>時刻</label><input type="time" id="rtTime"></div>
+      <div class="modes" id="rtPref"><button data-p="fast" class="on">最速</button><button data-p="easy">最楽（乗換が少ない）</button></div>
       <button class="go" id="rtGo">検索</button>
     </div>
     <div class="rtres" id="rtRes"></div>
@@ -834,21 +843,49 @@ function openTrainInfo(tr){
 /* ========== 乗換案内 ========== */
 const XFER_SEC = 180;          // 別路線への乗換時間（同名駅）
 const SAME_ROUTE_XFER_SEC = 0; // 同じ路線・同じ駅での乗り継ぎ（終着→始発など）
-let rtMode='dep';
+let rtMode='dep', rtPref='fast';
+const MAX_TF=4;   // 乗車回数の上限（乗換3回まで）
+let ALL_STATIONS=null;   // [{name, lines:[路線名,...]}]
+function allStations(){
+  if(ALL_STATIONS) return ALL_STATIONS;
+  const map=new Map();
+  ROUTES.forEach((r,i)=>{ const d=routeData(i); for(const st of d.stations){ if(!map.has(st.name)) map.set(st.name,{name:st.name,lines:[]}); map.get(st.name).lines.push(d.rosenName); } });
+  return ALL_STATIONS=[...map.values()];
+}
+// 入力との一致度: 完全一致 > 前方一致 > 部分一致 > 文字の重なり
+function stationScore(q, name){
+  if(!q) return 0;
+  if(name===q) return 1000;
+  if(name.startsWith(q)) return 800+q.length*5-name.length;
+  const i=name.indexOf(q); if(i>=0) return 600-i*5+q.length*5-name.length;
+  let hit=0; for(const ch of new Set(q)) if(name.includes(ch)) hit++;
+  return hit? 100+hit*20-name.length : -1;
+}
+function attachSuggest(id){
+  const inp=$(id), list=inp.parentElement.querySelector('.suglist');
+  const render=()=>{
+    const q=inp.value.trim();
+    const cands=allStations().map(st=>({st,sc:stationScore(q,st.name)})).filter(x=>x.sc>=0).sort((a,b)=>b.sc-a.sc||a.st.name.localeCompare(b.st.name,'ja')).slice(0,8);
+    list.innerHTML=cands.map(x=>`<div data-n="${esc(x.st.name)}">${esc(x.st.name)}<small>${esc(x.st.lines.join('・'))}</small></div>`).join('');
+    list.classList.toggle('show',cands.length>0);
+    list.querySelectorAll('div').forEach(d=>d.onmousedown=e=>{ e.preventDefault(); inp.value=d.dataset.n; list.classList.remove('show'); inp.classList.remove('bad'); });
+  };
+  inp.oninput=render; inp.onfocus=render;
+  inp.onblur=()=>{ setTimeout(()=>list.classList.remove('show'),150); const q=inp.value.trim(); if(q&&!allStations().some(st=>st.name===q)){ const best=allStations().map(st=>({st,sc:stationScore(q,st.name)})).sort((a,b)=>b.sc-a.sc)[0]; if(best&&best.sc>=600) inp.value=best.st.name; } };
+}
+['rtFrom','rtVia1','rtVia2','rtTo'].forEach(attachSuggest);
 function routeEnter(){
   const now=nowSec(); $('rtNow').textContent=`${dateStr()} ${fmt(now)} 現在`;
-  // 駅一覧（路線ごとにまとめ、同名駅は1つ）
-  const seen=new Set(); let opts='';
-  ROUTES.forEach((r,i)=>{ const d=routeData(i); opts+=`<optgroup label="${esc(d.rosenName)}">`;
-    for(const st of d.stations){ if(seen.has(st.name)) continue; seen.add(st.name); opts+=`<option value="${esc(st.name)}">${esc(st.name)}</option>`; }
-    opts+=`</optgroup>`; });
-  for(const id of ['rtFrom','rtTo']) if(!$(id).options.length) $(id).innerHTML=opts;
-  for(const id of ['rtVia1','rtVia2']) if(!$(id).options.length) $(id).innerHTML=`<option value="">（指定なし）</option>`+opts;
+  if(!$('rtDate').value){ const d=opDate(); $('rtDate').value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
   if(!$('rtTime').value){ const t=now%86400; $('rtTime').value=`${String(Math.floor(t/3600)).padStart(2,'0')}:${String(Math.floor(t%3600/60)).padStart(2,'0')}`; }
 }
+function rtDateObj(){ const v=$('rtDate').value; if(!v) return opDate(); const [y,m,d]=v.split('-').map(Number); return new Date(y,m-1,d,12); }
 $('rtModes').querySelectorAll('button').forEach(b=>b.onclick=()=>{ rtMode=b.dataset.m; $('rtModes').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); $('rtTimeRow').style.display=(rtMode==='dep'||rtMode==='arr')?'':'none'; });
+$('rtPref').querySelectorAll('button').forEach(b=>b.onclick=()=>{ rtPref=b.dataset.p; $('rtPref').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); });
 $('rtGo').onclick=()=>{
-  const from=$('rtFrom').value, to=$('rtTo').value, vias=[$('rtVia1').value,$('rtVia2').value].filter(Boolean);
+  const from=$('rtFrom').value.trim(), to=$('rtTo').value.trim(), vias=[$('rtVia1').value.trim(),$('rtVia2').value.trim()].filter(Boolean);
+  let bad=false; for(const id of ['rtFrom','rtVia1','rtVia2','rtTo']){ const v=$(id).value.trim(); const ok=!v||allStations().some(st=>st.name===v); $(id).classList.toggle('bad',!ok); if(!ok) bad=true; if(!v&&(id==='rtFrom'||id==='rtTo')){ $(id).classList.add('bad'); bad=true; } }
+  if(bad){ $('rtRes').innerHTML=`<p class="rtmsg">駅名を確認してください（候補から選んでください）。</p>`; return; }
   if(from===to){ $('rtRes').innerHTML=`<p class="rtmsg">出発駅と到着駅が同じです。</p>`; return; }
   let t=null;
   if(rtMode==='dep'||rtMode==='arr'){ const [hh,mm]=($('rtTime').value||'00:00').split(':').map(Number); t=hh*3600+mm*60; if(t<DAY_START) t+=86400; }
@@ -856,7 +893,7 @@ $('rtGo').onclick=()=>{
   else if(rtMode==='last') t=DAY_START+86400-1;
   else t=nowSec();
   const arrivalMode=(rtMode==='arr'||rtMode==='last');
-  const res=searchJourneys(from,vias,to,t,arrivalMode,3);
+  const res=searchJourneys(from,vias,to,t,arrivalMode,3,rtPref);
   renderJourneys(res,from,to);
 };
 
@@ -865,7 +902,8 @@ let CONN=null;
 function buildConnections(){
   const conns=[], nodes={}, byName={};
   const node=(ri,idx)=>{ const k=ri+':'+idx; if(!(k in nodes)){ nodes[k]={ri,idx,name:routeData(ri).stations[idx].name}; (byName[nodes[k].name]=byName[nodes[k].name]||[]).push(k);} return k; };
-  ROUTES.forEach((r,ri)=>{ const d=routeData(ri); const dia=d.dias[pickDia(d.dias)];
+  const date=rtDateObj(), hol=isHolidayDia(date);
+  ROUTES.forEach((r,ri)=>{ const d=routeData(ri); let di=d.dias.findIndex(x=>hol?x.holiday:!x.holiday); if(di<0) di=0; const dia=d.dias[di];
     for(const tr of dia.trains){
       const st=tr.stops.filter(z=>z.kind===1&&z.arr!=null);
       for(let i=0;i<st.length-1;i++) conns.push({dep:st[i].dep, arr:st[i+1].arr, from:node(ri,st[i].idx), to:node(ri,st[i+1].idx), trip:tr, ri, fs:st[i], ts:st[i+1]});
@@ -873,42 +911,57 @@ function buildConnections(){
   conns.sort((a,b)=>a.dep-b.dep||a.arr-b.arr);
   return {conns,nodes,byName};
 }
-/* --- 最早到着（Connection Scan） --- */
-function earliestArrival(startNodes, t0, goalName){
+/* --- 多基準探索（到着時刻 × 乗車回数）: Connection Scan --- */
+function searchLabels(startNodes, t0, goalName, pref){
+  const slack = pref==='easy'? 90*60 : 0;   // 最楽は、最速到着より遅くても乗換の少ない便を探すため打ち切りを緩める
   const {conns,nodes,byName}=CONN;
-  const EA={}, pred={}, tripBoard=new Map();
-  const relax=(k,t,pr)=>{ if(t<(EA[k]??Infinity)){ EA[k]=t; pred[k]=pr; return true; } return false; };
-  for(const [k,t] of startNodes){ relax(k,t,null); for(const o of byName[nodes[k].name]) if(o!==k) relax(o,t+XFER_SEC,{type:'walk',from:k}); }
+  const L={};                          // node -> labels [{arr,tf,pred}]（パレート）
+  const addLabel=(k,lab)=>{
+    const arr=L[k]||(L[k]=[]);
+    if(lab.tf>MAX_TF) return false;
+    if(arr.some(o=>o.arr<=lab.arr&&o.tf<=lab.tf)) return false;
+    L[k]=arr.filter(o=>!(lab.arr<=o.arr&&lab.tf<=o.tf)); L[k].push(lab); return true;
+  };
+  for(const [k,t] of startNodes){ const l0={arr:t,tf:0,pred:null,node:k}; addLabel(k,l0); for(const o of byName[nodes[k].name]) if(o!==k) addLabel(o,{arr:t+XFER_SEC,tf:0,pred:{type:'walk',label:l0},node:o}); }
   const goalKeys=byName[goalName]||[];
+  const tripLab=new Map();             // trip -> {tf, conn, label}（乗車回数が最少の乗り方）
   for(const c of conns){
     if(c.dep<t0) continue;
-    const best=Math.min(...goalKeys.map(k=>EA[k]??Infinity));
-    if(c.dep>best) break;
-    const boarded=tripBoard.has(c.trip);
-    if(!boarded){ const ea=EA[c.from]; if(ea==null||ea>c.dep) continue; tripBoard.set(c.trip,{conn:c, at:ea}); }
-    if(relax(c.to,c.arr,{type:'conn',c})){
-      for(const o of byName[nodes[c.to].name]) if(o!==c.to) relax(o,c.arr+XFER_SEC,{type:'walk',from:c.to});
-    }
+    let bestGoal=Infinity; for(const k of goalKeys) for(const l of (L[k]||[])) if(l.arr<bestGoal) bestGoal=l.arr;
+    if(c.dep>bestGoal+slack) break;
+    let tl=tripLab.get(c.trip);
+    for(const l of (L[c.from]||[])){ if(l.arr<=c.dep && (!tl||l.tf+1<tl.tf)){ tl={tf:l.tf+1,conn:c,label:l}; } }
+    if(!tl) continue;
+    tripLab.set(c.trip,tl);
+    const lab={arr:c.arr,tf:tl.tf,pred:{type:'conn',c,board:tl},node:c.to};
+    if(addLabel(c.to,lab)) for(const o of byName[nodes[c.to].name]) if(o!==c.to) addLabel(o,{arr:c.arr+XFER_SEC,tf:tl.tf,pred:{type:'walk',label:lab},node:o});
   }
-  let bestK=null; for(const k of goalKeys) if(EA[k]!=null&&(bestK==null||EA[k]<EA[bestK])) bestK=k;
-  if(bestK==null) return null;
-  // 経路復元
-  const legs=[]; let k=bestK;
-  while(pred[k]){
-    const p=pred[k];
-    if(p.type==='walk'){ k=p.from; continue; }
-    const b=tripBoard.get(p.c.trip);
-    legs.unshift({ri:p.c.ri, trip:p.c.trip, from:b.conn.from, to:k, dep:b.conn.dep, arr:p.c.arr, fs:b.conn.fs, ts:p.c.ts});
-    k=b.conn.from;
-  }
-  return {legs, arrNode:bestK, arr:EA[bestK]};
+  const labs=[]; for(const k of goalKeys) for(const l of (L[k]||[])) labs.push(l);
+  return labs;
 }
-function journeyVia(fromName, vias, toName, t0){
+function labelToLegs(lab){
+  const legs=[]; let l=lab;
+  while(l&&l.pred){
+    const p=l.pred;
+    if(p.type==='walk'){ l=p.label; continue; }
+    const b=p.board;
+    legs.unshift({ri:p.c.ri, trip:p.c.trip, from:b.conn.from, to:l.node, dep:b.conn.dep, arr:p.c.arr, fs:b.conn.fs, ts:p.c.ts});
+    l=b.label;
+  }
+  return legs;
+}
+function earliestArrival(startNodes, t0, goalName, pref){
+  const labs=searchLabels(startNodes,t0,goalName,pref); if(!labs.length) return null;
+  labs.sort(pref==='easy'? ((a,b)=>a.tf-b.tf||a.arr-b.arr) : ((a,b)=>a.arr-b.arr||a.tf-b.tf));
+  const best=labs[0];
+  return {legs:labelToLegs(best), arrNode:best.node, arr:best.arr};
+}
+function journeyVia(fromName, vias, toName, t0, pref){
   const {byName}=CONN;
   if(!byName[fromName]||!byName[toName]) return null;
   let starts=byName[fromName].map(k=>[k,t0]); const legs=[]; let cur=t0;
   for(const goal of [...vias,toName]){
-    const r=earliestArrival(starts,cur,goal); if(!r) return null;
+    const r=earliestArrival(starts,cur,goal,pref); if(!r) return null;
     legs.push(...r.legs); cur=r.arr; starts=[[r.arrNode,r.arr]];
   }
   if(!legs.length) return null;
@@ -916,50 +969,55 @@ function journeyVia(fromName, vias, toName, t0){
   const merged=[]; for(const lg of legs){ const pv=merged[merged.length-1]; if(pv&&pv.trip===lg.trip&&pv.to===lg.from){ pv.to=lg.to; pv.arr=lg.arr; pv.ts=lg.ts; } else merged.push({...lg}); }
   return {legs:merged, dep:merged[0].dep, arr:merged[merged.length-1].arr};
 }
-function searchJourneys(fromName, vias, toName, t, arrivalMode, n){
+function searchJourneys(fromName, vias, toName, t, arrivalMode, n, pref='fast'){
   CONN=buildConnections();
   const out=[];
   if(!arrivalMode){
     let t0=t;
-    for(let i=0;i<n;i++){ const j=journeyVia(fromName,vias,toName,t0); if(!j) break; if(!out.some(o=>o.dep===j.dep&&o.arr===j.arr)) out.push(j); t0=j.dep+1; }
+    let guard=0;
+    while(out.length<n && guard++<40){ const j=journeyVia(fromName,vias,toName,t0,pref); if(!j) break;
+      if(!out.some(o=>o.arr===j.arr&&o.legs.length<=j.legs.length)) out.push(j); t0=j.dep+1; }
   }else{
     // 到着時刻指定: 出発駅の発車時刻を遅い順に試し、到着が間に合う最初の経路から n 本
     const origin=new Set(CONN.byName[fromName]||[]);
     const deps=[...new Set(CONN.conns.filter(c=>origin.has(c.from)&&c.dep<=t).map(c=>c.dep))].sort((a,b)=>b-a);
     for(const d of deps){ if(out.length>=n) break;
-      const j=journeyVia(fromName,vias,toName,d); if(!j||j.arr>t) continue;
-      if(!out.some(o=>o.dep===j.dep&&o.arr===j.arr)) out.push(j); }
+      const j=journeyVia(fromName,vias,toName,d,pref); if(!j||j.arr>t) continue;
+      if(!out.some(o=>o.dep===j.dep&&o.legs.length<=j.legs.length)) out.push(j); }
     out.reverse();
   }
   return out;
 }
 function renderJourneys(list, fromName, toName){
   if(!list.length){ $('rtRes').innerHTML=`<p class="rtmsg">該当する経路が見つかりませんでした。</p>`; return; }
-  const dur=s=>`${Math.floor(s/3600)?Math.floor(s/3600)+'時間':''}${Math.round(s%3600/60)}分`;
+  const dd=rtDateObj(); const dlabel=`${dd.getMonth()+1}/${dd.getDate()}（${'日月火水木金土'[dd.getDay()]}）${isHolidayDia(dd)?'休日ダイヤ':'平日ダイヤ'}`;
+  const M=t=>Math.floor(t/60);                       // 分単位（秒は切り捨て）
+  const fmtM=t=>{ const m=M(t); return `${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}`; };
+  const dur=(a,b)=>{ const m=M(b)-M(a); return `${Math.floor(m/60)?Math.floor(m/60)+'時間':''}${m%60}分`; };
   let h='';
   list.forEach((j,ji)=>{
     const xf=j.legs.length-1;
-    h+=`<div class="jcard"><div class="jhead"><span class="tm">${fmtHM(j.dep)}</span><span class="arrow">→</span><span class="tm">${fmtHM(j.arr)}</span>
-      <div class="meta">所要 ${dur(j.arr-j.dep)}<br>乗換 ${xf}回　運賃 N/A円</div></div><div class="jbody">`;
+    h+=`<div class="jcard"><div class="jhead"><span class="tm">${fmtM(j.dep)}</span><span class="arrow">→</span><span class="tm">${fmtM(j.arr)}</span>
+      <div class="meta">所要 ${dur(j.dep,j.arr)}<br>乗換 ${xf}回　運賃 N/A円</div></div><div class="jbody">`;
     j.legs.forEach((lg,li)=>{
       const d=routeData(lg.ri), fromSt=CONN.nodes[lg.from], toSt=CONN.nodes[lg.to];
       const mark=MARKS[lg.trip.type.name]??lg.trip.type.name.slice(0,1), c=chevColor(lg.trip);
       const dest=lg.trip.destIdx!=null? d.stations[lg.trip.destIdx].name:'';
       const trkF=(lg.fs.track!=null&&d.stations[fromSt.idx].tracks[lg.fs.track])||'';
       const trkT=(lg.ts.track!=null&&d.stations[toSt.idx].tracks[lg.ts.track])||'';
-      h+=`<div class="jst"><span>${fmtHM(lg.dep)}</span><span class="dot"></span><span>${esc(fromSt.name)}${trkF?`<span class="trk">${esc(trkF)}番線</span>`:''}</span></div>`;
+      h+=`<div class="jst"><span>${fmtM(lg.dep)}</span><span class="dot"></span><span>${esc(fromSt.name)}${trkF?`<span class="trk">${esc(trkF)}番線</span>`:''}</span></div>`;
       h+=`<div class="jleg"><span></span><span class="bar" style="background:${c}"></span>
-        <div class="info" data-j="${ji}" data-l="${li}">${mark?`<span class="mk" style="background:${c}">${esc(mark)}</span>`:''}<b>${esc(d.rosenName)} ${esc(lg.trip.type.name)} ${esc(dest)}行</b><br>${esc(lg.trip.trainNo)}　${lg.trip.cars}両　${dur(lg.arr-lg.dep)}</div></div>`;
+        <div class="info" data-j="${ji}" data-l="${li}">${mark?`<span class="mk" style="background:${c}">${esc(mark)}</span>`:''}<b>${esc(d.rosenName)} ${esc(lg.trip.type.name)} ${esc(dest)}行</b><br>${esc(lg.trip.trainNo)}　${lg.trip.cars}両　${dur(lg.dep,lg.arr)}</div></div>`;
       if(li<j.legs.length-1){ const nx=j.legs[li+1]; const same=nx.ri===lg.ri;
-        h+=`<div class="jst"><span>${fmtHM(lg.arr)}</span><span class="dot"></span><span>${esc(toSt.name)}${trkT?`<span class="trk">${esc(trkT)}番線</span>`:''}</span></div>
-            <div class="jleg"><span></span><span></span><div class="jxfer" style="padding-left:0">${same?'同じ駅で乗り継ぎ':'乗換'}（待ち ${dur(nx.dep-lg.arr)}）</div></div>`;
+        h+=`<div class="jst"><span>${fmtM(lg.arr)}</span><span class="dot"></span><span>${esc(toSt.name)}${trkT?`<span class="trk">${esc(trkT)}番線</span>`:''}</span></div>
+            <div class="jleg"><span></span><span></span><div class="jxfer" style="padding-left:0">${same?'同じ駅で乗り継ぎ':'乗換'}（待ち ${dur(lg.arr,nx.dep)}）</div></div>`;
       }else{
-        h+=`<div class="jst"><span>${fmtHM(lg.arr)}</span><span class="dot"></span><span>${esc(toSt.name)}${trkT?`<span class="trk">${esc(trkT)}番線</span>`:''}</span></div>`;
+        h+=`<div class="jst"><span>${fmtM(lg.arr)}</span><span class="dot"></span><span>${esc(toSt.name)}${trkT?`<span class="trk">${esc(trkT)}番線</span>`:''}</span></div>`;
       }
     });
     h+=`</div></div>`;
   });
-  $('rtRes').innerHTML=h;
+  $('rtRes').innerHTML=`<div style="font-size:13px;color:#555;margin:0 0 8px">${esc(dlabel)}</div>`+h;
   $('rtRes').querySelectorAll('.info').forEach(el=>el.onclick=()=>{ const lg=list[+el.dataset.j].legs[+el.dataset.l]; openTrainInfoR(lg.ri, lg.trip, CONN.nodes[lg.from].idx); });
 }
 /* 列車ポップアップ（路線指定版） */
