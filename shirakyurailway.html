@@ -72,14 +72,35 @@
   .modal .xlist button{display:block;width:100%;text-align:left;background:none;border:0;padding:14px 4px;font-size:18px;color:#1a5cff}
   .st .dot{position:absolute;left:50%;top:50%;width:30px;height:30px;border-radius:50%;background:var(--blue);transform:translate(-50%,-50%)}
   .tr{position:absolute;display:flex;align-items:center;gap:10px;transform:translateY(-50%);cursor:pointer;-webkit-tap-highlight-color:transparent;z-index:2}
-  .tr.up{right:calc(50% + 30px);flex-direction:row-reverse}
-  .tr.dn{left:calc(50% + 30px)}
+  .tr.up{right:calc(50% + 22px);flex-direction:row-reverse}
+  .tr.dn{left:calc(50% + 22px)}
   .tr .chev{width:34px;height:52px;flex:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
   .tr .lbl{line-height:1.25;white-space:nowrap}
   .tr.up .lbl{text-align:right}
-  .tr .no{font-size:17px;font-weight:500}
   .tr .no b{display:inline-block;min-width:1.3em;padding:0 4px;margin-right:4px;border-radius:4px;color:#fff;font-size:14px;text-align:center;line-height:1.35;vertical-align:1px}
-  .tr .dest{font-size:16px;color:#222}
+  .tr .no{font-size:15px;font-weight:500}
+  .tr .dest b{display:inline-block;min-width:1.3em;padding:0 4px;margin-right:4px;border-radius:4px;color:#fff;font-size:14px;text-align:center;line-height:1.35;vertical-align:1px}
+  .tr .dest{font-size:14px;color:#222}
+  /* 複々線（4列）表示 */
+  .track .railcap{position:absolute;top:6px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:10px;color:var(--ink-dim);z-index:3}
+  .track .railcap b{font-size:13px;color:#fff;background:var(--blue);border-radius:4px;padding:1px 6px}
+  .track.multi .line{width:10px}
+  .track.multi .st .dot{width:22px;height:22px}
+  .track.multi .st .nm{font-size:15px;top:5px}
+  .track.multi .tr{gap:2px;flex-direction:column}
+  /* みやこ線（複々線）は矢印も列番も線路側に寄せる */
+  .track.multi .tr.up{align-items:flex-end}
+  .track.multi .tr.up .lbl{text-align:right}
+  .track.multi .tr.dn{align-items:flex-start}
+  .track.multi .tr.dn .lbl{text-align:left}
+  .track.multi .tr .chev{width:18px;height:24px}
+  .track.multi .tr .lbl{max-width:92px;line-height:1.15}
+  .track.multi .tr .no,.track.multi .tr .dest{overflow:hidden;text-overflow:ellipsis}
+  .track.multi .tr .no{font-size:11px;font-weight:700;letter-spacing:-.02em}
+  .track.multi .tr .dest b{display:inline-block;font-size:9px;padding:0 2px;margin-right:2px;min-width:1em;border-radius:3px;color:#fff;text-align:center;line-height:1.35;vertical-align:1px}
+  .track.multi .tr .dest{font-size:10px}
+  .track.multi .tr.mult .no::after{display:none}
+  .track.multi .railcap{gap:3px;font-size:9px}
   .tr.mult .no::after{content:"併結";display:inline-block;margin-left:4px;font-size:10px;font-weight:700;color:#fff;background:#d47b00;border-radius:3px;padding:0 3px;vertical-align:2px}
   .heik{margin:4px 0 12px;padding:8px 10px;background:#fff6e5;border-left:4px solid #d47b00;font-size:14px;line-height:1.6}
 
@@ -372,6 +393,13 @@ const EXCLUDE_RULES = {
   '白急遊園地線': (dia,tr)=> (!dia.holiday && tr.opNoRaw==='O24') || tr.opNoRaw==='T01',   // 平日のO24運用、T01運用は削除
 };
 const CHEV_COLOR = {'普通':'#111'};
+// 路線ごとの種別色（走行位置の矢印・マーク、駅時刻表、乗換案内で使う）
+const HAKKYU_COLORS = {'普通':'#000000','準急':'#25b425','急行':'#fe6703','通勤急行':'#3c51cc','快速急行':'#720da8','特急':'#fe1235'};
+const TYPE_COLORS = { '白急桜田線':HAKKYU_COLORS, '白急みやこ線':HAKKYU_COLORS };
+// 複々線の配置（路線名 → 線路と、列車をどの線路に置くか）。左から 快速線上り|快速線下り|緩行線上り|緩行線下り
+const LANE_LAYOUTS = {
+  '白急みやこ線': { rails:[{name:'快速線', x:25},{name:'緩行線', x:75}], railOf:tr=> tr.type.name==='普通'? 1 : 0 },
+};
 const REFRESH_MS = 15000;                        // 走行位置の更新間隔
 const DAY_START = 4*3600;                        // 1日の起点 4:00（0:00〜3:59は前日扱い＝24時〜27時）
 
@@ -417,6 +445,7 @@ function parseOud2(text, fallbackName){
     }
     const rname0=rosen.Rosenmei||fallbackName, showT=OPS_SHOW_TYPES[rname0]||[];
     const diaObj={name:d.DiaName||'ダイヤ', trains: trains.filter(x=>!x.hidden), holiday:/土休|休日|土日/.test(d.DiaName||'')};
+    { const tc=TYPE_COLORS[rosen.Rosenmei||fallbackName]; if(tc) for(const x of trains){ if(tc[x.type.name]) x.color=tc[x.type.name]; } }
     diaObj.opsTrains=trains.filter(x=>!x.hidden||showT.includes(x.type.name));
     const rname=rosen.Rosenmei||fallbackName;
     const exr=EXCLUDE_RULES[rname]; if(exr){ diaObj.trains=diaObj.trains.filter(x=>!exr(diaObj,x)); diaObj.opsTrains=diaObj.opsTrains.filter(x=>!exr(diaObj,x)); }
@@ -619,7 +648,7 @@ function fmt(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=Math.
 function fmtHM(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=Math.floor(sec%60);return `${h}:${String(m).padStart(2,'0')}`+(s?`:${String(s).padStart(2,'0')}`:'');}
 function fmtHMM(sec){const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60);return `${h}${String(m).padStart(2,'0')}`}
 function dateStr(){const d=opDate();return `${d.getMonth()+1}/${d.getDate()}`}
-function chevColor(tr){return CHEV_COLOR[tr.type.name]||tr.type.color}
+function chevColor(tr){return tr.color||CHEV_COLOR[tr.type.name]||tr.type.color}
 /* 休日ダイヤ判定: 土日・祝日・振替休日・12/29〜1/4・8/13〜8/16 */
 function isJPHoliday(d){
   const y=d.getFullYear(), m=d.getMonth()+1, day=d.getDate(), wd=d.getDay();
@@ -700,17 +729,21 @@ function renderPosSel(){
 }
 
 /* ========== 走行位置 ========== */
-const ST_H=96, SEG_H=190, PAD=20;   // 駅間は列車3本（56px×3）が縦に入る高さ
+const ST_H=96; let SEG_H=250, PAD=20, LAYOUT=null;   // 駅間は列車3本が縦に入る高さ（列車マークの下に列番を出すので1本あたり約80px）
 let posDia=0, timer=null, curT=0, selected=null;
 const yOf=idx=>PAD+idx*(ST_H+SEG_H)+ST_H/2;
 
 function buildTrack(){
+  LAYOUT=LANE_LAYOUTS[data.rosenName]||null;
+  const rails= LAYOUT? LAYOUT.rails : [{name:'',x:50}];
+  PAD= LAYOUT? 44 : 20; SEG_H=190;
   const n=data.stations.length, H=PAD*2+n*ST_H+(n-1)*SEG_H;
-  let s=`<div class="line"></div>`;
+  let s=rails.map(r=>`<div class="line" style="left:${r.x}%"></div>`).join('');
+  if(LAYOUT) s+=rails.map(r=>`<div class="railcap" style="left:${r.x}%"><span>▲上り</span><b>${esc(r.name)}</b><span>下り▼</span></div>`).join('');
   data.stations.forEach((st,i)=>{
-    s+=`<div class="st" style="top:${yOf(i)-ST_H/2}px"><div class="tag"></div><div class="nm xfer" data-st="${esc(st.name)}" data-i="${i}">${esc(st.name)}</div><div class="dot"></div></div>`; });
+    s+=`<div class="st" style="top:${yOf(i)-ST_H/2}px"><div class="tag"></div><div class="nm xfer" data-st="${esc(st.name)}" data-i="${i}">${esc(st.name)}</div>${rails.map(r=>`<div class="dot" style="left:${r.x}%"></div>`).join('')}</div>`; });
   s+=`<div id="trains"></div>`;
-  const tk=$('track'); tk.style.height=H+'px'; tk.innerHTML=s;
+  const tk=$('track'); tk.classList.toggle('multi',!!LAYOUT); tk.style.height=H+'px'; tk.innerHTML=s;
   $('trains').addEventListener('click',e=>{const g=e.target.closest('.tr'); if(g) openModal(+g.dataset.k);});
   tk.querySelectorAll('.nm.xfer').forEach(el=>el.onclick=()=>openXfer(el.dataset.st,+el.dataset.i));
   $('posTitle').textContent=data.rosenName;
@@ -728,8 +761,9 @@ function renderPos(t){
     const base= loc.state==='stop'? yOf(loc.idx) : (yOf(loc.from)+yOf(loc.to))/2;
     // 並び順キー: 走行中＝次駅に着く推定時刻、停車中＝発車時刻（早いほど先行。同じ駅間では追い越せない）
     const prog= loc.state==='run'? loc.tb : loc.stop.dep;
-    const key=(tr.down?'d':'u')+Math.round(base);
-    (groups[key]=groups[key]||{base, down:tr.down, items:[]}).items.push({k,tr,prog,at:(loc.state==='stop'?loc.idx:loc.from)});
+    const rail= LAYOUT? LAYOUT.railOf(tr) : 0;
+    const key=rail+(tr.down?'d':'u')+Math.round(base);
+    (groups[key]=groups[key]||{base, down:tr.down, rail, items:[]}).items.push({k,tr,prog,at:(loc.state==='stop'?loc.idx:loc.from)});
   }
   // 2) 先に出た列車ほど進行方向側に置く。下りは画面下が前方、上りは画面上が前方なので、
   //    どちらも「早い順」に上から並べれば、下りは先頭が下…ではなく逆になるため下りだけ反転する
@@ -737,20 +771,23 @@ function renderPos(t){
     const gr=groups[key];
     gr.items.sort((a,b)=>a.prog-b.prog);      // 早く出た順（先頭が先）
     if(gr.down) gr.items.reverse();           // 下り: 先頭を一番下へ
-    const n=gr.items.length;
+    const n=gr.items.length, rx=(LAYOUT? LAYOUT.rails[gr.rail] : {x:50}).x, off=LAYOUT? 8 : 22, step=LAYOUT? 54 : 56;
     gr.items.forEach((it,i)=>{
-      const y=gr.base+(i-(n-1)/2)*56;
+      const y=gr.base+(i-(n-1)/2)*step;
       const {k,tr,at}=it;
       let el=g.querySelector('#tr'+k);
       if(!el){
         el=document.createElement('div'); el.className='tr '+(tr.down?'dn':'up'); el.id='tr'+k; el.dataset.k=k;
         const mark=MARKS[tr.type.name]??tr.type.name.slice(0,1), c=chevColor(tr);
+        const mk= mark?`<b style="background:${c}">${esc(mark)}</b>`:'', dst=esc(tr.destIdx!=null?data.stations[tr.destIdx].name:'');
+        // 複々線表示では幅が足りないので、種別マークは2行目（行先の前）に置く
         el.innerHTML=`<svg class="chev" style="fill:${c}"><use href="#${tr.down?'chevDn':'chevUp'}"/></svg>
-          <div class="lbl"><div class="no">${mark?`<b style="background:${c}">${esc(mark)}</b>`:''}${esc(tr.trainNo)}[<span class="cc"></span>]</div>
-          <div class="dest">${esc(tr.destIdx!=null?data.stations[tr.destIdx].name:'')}</div></div>`;
+          <div class="lbl"><div class="no">${LAYOUT?'':mk}${esc(tr.trainNo)}[<span class="cc"></span>]</div>
+          <div class="dest">${LAYOUT?mk:''}${dst}</div></div>`;
         g.appendChild(el);
       }
       el.style.top=y+'px';
+      if(tr.down){ el.style.left=`calc(${rx}% + ${off}px)`; el.style.right=''; } else { el.style.right=`calc(${100-rx}% + ${off}px)`; el.style.left=''; }
       const g2=segAt(tr,at); el.querySelector('.cc').textContent= g2&&g2.cars!=null? g2.cars : tr.cars;
       el.classList.toggle('mult', !!(g2&&g2.units.length>1));
     });
@@ -900,7 +937,7 @@ function renderTT(){
 
 /* ========== 駅時刻表（京阪風） ========== */
 const KTT_COLOR={'普通':null,'準急':'#2b62c9','急行':'#e8731e','通勤急行':'#7b3f9d','快速':'#2e9b4f','特急':'#c0392b','特快速':'#1e8a7a','快速急行':'#d1336b'};   // null=白地黒枠
-function kttColor(name){ return KTT_COLOR[name]===undefined? '#555' : KTT_COLOR[name]; }
+function kttColor(name, tr){ if(name==='普通') return null; if(tr&&tr.color) return tr.color; return KTT_COLOR[name]===undefined? '#555' : KTT_COLOR[name]; }   // 普通は白地黒枠
 $('sttRoute').onchange=()=>{ setRoute(+$('sttRoute').value); ttState.st=0; ttState.dia=pickDia(data.dias); renderSTT(); };
 $('sttDia').onchange=()=>{ ttState.dia=+$('sttDia').value; renderSTT(); };
 $('sttSt').onchange=()=>{ ttState.st=+$('sttSt').value; renderSTT(); };
@@ -934,7 +971,7 @@ function renderSTT(){
     h+=`<div class="krow"><div class="khr">${hh}</div><div class="kcells">`;
     for(const d of byHour[hh]){
       const mm=String(Math.floor(d.t%3600/60)).padStart(2,'0');
-      const col=kttColor(d.x.type.name);
+      const col=kttColor(d.x.type.name, d.x);
       const dest=d.x.destIdx!=null?data.stations[d.x.destIdx].name:'';
       const trk=trackName(d.s), first=(d.s===d.x.first);
       h+=`<div class="kd ${col?'':'plain'}" style="${col?`background:${col}`:''}" data-k="${dia.trains.indexOf(d.x)}" title="${esc(d.x.type.name)} ${esc(d.x.trainNo)}">
@@ -944,7 +981,7 @@ function renderSTT(){
     h+=`</div></div>`;
   }
   const used=[...new Set(deps.map(d=>d.x.type.name))];
-  h+=`<div class="klegend">${used.map(n=>{const c=kttColor(n);return `<span class="kd ${c?'':'plain'}" style="${c?`background:${c}`:''}"></span>${esc(n)}`;}).join('')}<br>枠の上＝行先、左下＝発車番線（「始」は当駅始発）、右下＝両数</div>`;
+  h+=`<div class="klegend">${used.map(n=>{const c=kttColor(n, deps.find(d=>d.x.type.name===n).x);return `<span class="kd ${c?'':'plain'}" style="${c?`background:${c}`:''}"></span>${esc(n)}`;}).join('')}<br>枠の上＝行先、左下＝発車番線（「始」は当駅始発）、右下＝両数</div>`;
   $('sttBody').innerHTML=h;
   $('sttBody').querySelectorAll('.kd[data-k]').forEach(el=>el.onclick=()=>openTrainInfo(dia.trains[+el.dataset.k]));
 }
