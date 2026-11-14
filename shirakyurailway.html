@@ -179,6 +179,12 @@
   .tt .cars{display:inline-block;width:20px;height:20px;border-radius:50%;border:1px solid #333;line-height:18px;font-size:11px;background:#fff}
   .tt td.major{background:#fbfbfb}
   /* 駅時刻表（京阪風） */
+  .kfil{padding:8px 8px 2px;background:#f4f6fb;border-bottom:1px solid var(--rule)}
+  .kfil .frow{display:flex;align-items:flex-start;gap:8px;margin-bottom:6px}
+  .kfil .flab{flex:none;width:3.4em;font-size:12px;font-weight:700;color:var(--navy);padding-top:6px}
+  .kfil .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .kfil .chips button{border:1.5px solid var(--blue-ink);background:#fff;color:var(--blue-ink);border-radius:16px;padding:4px 11px;font-size:13px;font-weight:600;line-height:1.3}
+  .kfil .chips button.on{background:var(--blue-ink);color:#fff}
   .ktt{padding:8px 6px 40px;background:#fff}
   .krow{display:flex;align-items:flex-start;background:#d9d9d9;margin-bottom:4px;min-height:58px}
   .krow:nth-child(even){background:#e9e9e9}
@@ -355,8 +361,11 @@
     <select id="sttDia"></select>
     <select id="sttSt"></select>
     <div class="tog"><button id="sttUp">上り</button><button id="sttDn" class="on">下り</button></div>
-    <select id="sttType" aria-label="種別で絞り込み"></select>
-    <select id="sttDest" aria-label="行き先で絞り込み"></select>
+
+  </div>
+  <div class="kfil" id="sttFilter">
+    <div class="frow"><span class="flab">種別</span><div class="chips" id="sttType"></div></div>
+    <div class="frow"><span class="flab">行き先</span><div class="chips" id="sttDest"></div></div>
   </div>
   <div class="ktt" id="sttBody"></div>
 </section>
@@ -966,8 +975,11 @@ $('sttRoute').onchange=()=>{ setRoute(+$('sttRoute').value); ttState.st=0; ttSta
 $('sttDia').onchange=()=>{ ttState.dia=+$('sttDia').value; renderSTT(); };
 $('sttSt').onchange=()=>{ ttState.st=+$('sttSt').value; renderSTT(); };
 $('sttUp').onclick=()=>{ ttState.down=false; renderSTT(); };
-$('sttType').onchange=()=>{ ttState.fType=$('sttType').value; renderSTT(); };
-$('sttDest').onchange=()=>{ ttState.fDest=$('sttDest').value; renderSTT(); };
+// 種別・行き先は複数選択（何も選ばないときはすべて表示）
+ttState.fTypes=new Set(); ttState.fDests=new Set();
+function chipClick(set, v){ if(v==='') set.clear(); else if(set.has(v)) set.delete(v); else set.add(v); renderSTT(); }
+$('sttType').onclick=e=>{ const b=e.target.closest('button'); if(b) chipClick(ttState.fTypes,b.dataset.v); };
+$('sttDest').onclick=e=>{ const b=e.target.closest('button'); if(b) chipClick(ttState.fDests,b.dataset.v); };
 $('sttDn').onclick=()=>{ ttState.down=true; renderSTT(); };
 function renderSTT(){
   const dia=data.dias[ttState.dia]||data.dias[0], down=ttState.down;
@@ -994,12 +1006,13 @@ function renderSTT(){
   const typeOpts=[...new Set(deps.map(d=>d.x.type.name))];
   const destOpts=[...new Set(deps.map(d=>destName(d.x)))].sort((a,b)=>data.stations.findIndex(z=>z.name===a)-data.stations.findIndex(z=>z.name===b));
   if(!down) destOpts.reverse();
-  if(ttState.fType&&!typeOpts.includes(ttState.fType)) ttState.fType='';
-  if(ttState.fDest&&!destOpts.includes(ttState.fDest)) ttState.fDest='';
-  $('sttType').innerHTML=`<option value="">すべての種別</option>`+typeOpts.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join(''); $('sttType').value=ttState.fType||'';
-  $('sttDest').innerHTML=`<option value="">すべての行き先</option>`+destOpts.map(n=>`<option value="${esc(n)}">${esc(n)}行</option>`).join(''); $('sttDest').value=ttState.fDest||'';
+  for(const v of [...ttState.fTypes]) if(!typeOpts.includes(v)) ttState.fTypes.delete(v);
+  for(const v of [...ttState.fDests]) if(!destOpts.includes(v)) ttState.fDests.delete(v);
+  const chips=(opts,set,lab)=>`<button class="${set.size?'':'on'}" data-v="">すべて</button>`+opts.map(n=>`<button class="${set.has(n)?'on':''}" data-v="${esc(n)}">${esc(lab(n))}</button>`).join('');
+  $('sttType').innerHTML=chips(typeOpts,ttState.fTypes,n=>n);
+  $('sttDest').innerHTML=chips(destOpts,ttState.fDests,n=>n+'行');
   const allDeps=deps.slice();
-  deps.splice(0, deps.length, ...allDeps.filter(d=>(!ttState.fType||d.x.type.name===ttState.fType)&&(!ttState.fDest||destName(d.x)===ttState.fDest)));
+  deps.splice(0, deps.length, ...allDeps.filter(d=>(!ttState.fTypes.size||ttState.fTypes.has(d.x.type.name))&&(!ttState.fDests.size||ttState.fDests.has(destName(d.x)))));
   const byHour={}; for(const d of deps){ const hh=Math.floor(d.t/3600); (byHour[hh]=byHour[hh]||[]).push(d); }
   const hours=Object.keys(byHour).map(Number).sort((a,b)=>a-b);
   if(!hours.length){ $('sttBody').innerHTML=`<p style="color:#666;padding:12px">${allDeps.length?'条件に合う列車はありません。':'この方面の発車はありません。'}</p>`; return; }
