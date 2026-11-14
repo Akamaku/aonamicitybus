@@ -81,6 +81,10 @@
   .tr .no{font-size:15px;font-weight:500}
   .tr .dest b{display:inline-block;min-width:1.3em;padding:0 4px;margin-right:4px;border-radius:4px;color:#fff;font-size:14px;text-align:center;line-height:1.35;vertical-align:1px}
   .tr .dest{font-size:14px;color:#222}
+  .tr .dl{color:#d00;font-weight:700}
+  .dlabel{display:inline-block;margin-left:6px;color:#d00;font-weight:800}
+  .dnote{display:block;font-size:13px;color:#a00;margin-top:2px}
+  .kd .dly{position:absolute;right:0;top:-16px;font-size:11px;font-weight:800;color:#d00;white-space:nowrap}
   /* 複々線（4列）表示 */
   .track .railcap{position:absolute;top:6px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:10px;color:var(--ink-dim);z-index:3}
   .track .railcap b{font-size:13px;color:#fff;background:var(--blue);border-radius:4px;padding:1px 6px}
@@ -377,6 +381,7 @@
   <symbol id="chevUp" viewBox="0 0 34 52"><path d="M0 52 L17 36 L34 52 L34 16 L17 0 L0 16 Z"/></symbol>
 </defs></svg>
 
+<script src="delay-config.js"></script>
 <script>
 /* ========== 設定 ========== */
 const MARKS  = {'超快速':'超快', '区間急行':'区急', 'ライナー':'ラ', '普通':'', '準急':'準', '急行':'急', '通勤急行':'通', '快速':'快', '特急':'特', '特快速':'特快', '快速急行':'快急'};
@@ -718,6 +723,31 @@ function isHolidayDia(d){
   return isJPHoliday(d);
 }
 function pickDia(dias){ const hol=isHolidayDia(opDate()); const i=dias.findIndex(d=>hol?d.holiday:!d.holiday); return i>=0?i:0; }
+/* ========== 遅延情報 ========== */
+// admin.html で編集した遅れを読み込む。Google Apps Script のウェブアプリURLを入れると有効になる（空なら遅延表示なし）
+const DELAY_API = (window.DELAY_API||'').trim();   // delay-config.js で設定
+let DELAYS={date:'', rules:[]};
+function opDateKey(d){ d=d||opDate(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+// 列車の遅れ（秒）。列車＞種別＞上下線＞路線全体 の順に、より細かい指定を優先。運行日が違うデータは無視（毎日4:00に自動で解除）
+function delayRule(routeName, tr){
+  if(!tr||DELAYS.date!==opDateKey()) return null;
+  let best=null, bs=-1;
+  for(const r of (DELAYS.rules||[])){
+    if(r.route!==routeName) continue;
+    if(r.dir && r.dir!==(tr.down?'down':'up')) continue;
+    if(r.type && r.type!==tr.type.name) continue;
+    if(r.train && r.train!==tr.trainNo) continue;
+    const sc=(r.train?8:0)+(r.type?4:0)+(r.dir?2:0);
+    if(sc>bs){ bs=sc; best=r; }
+  }
+  return best;
+}
+function delayOf(routeName, tr){ const r=delayRule(routeName,tr); return r? Math.max(0,+r.min||0)*60 : 0; }
+function delayHtml(routeName, tr){ const r=delayRule(routeName,tr); if(!r||!(+r.min>0)) return ''; return `<span class="dlabel">${+r.min}分遅れ</span>${r.note?`<span class="dnote">${esc(r.note)}</span>`:''}`; }
+async function loadDelays(){
+  if(!DELAY_API) return;
+  try{ const res=await fetch(DELAY_API+(DELAY_API.includes('?')?'&':'?')+'action=list&t='+Date.now()); const j=await res.json(); if(j&&Array.isArray(j.rules)) DELAYS=j; }catch(e){}
+}
 function trackName(s){ const st=data.stations[s.idx]; return (s.track!=null&&st.tracks[s.track]!=null)? st.tracks[s.track] : ''; }
 
 let data=null;
@@ -789,7 +819,7 @@ function renderPos(t){
   // 1) 位置を求めてグループ化（同方面・同じ駅／駅間）
   for(let k=0;k<trains.length;k++){
     const tr=trains[k]; if(tr.hidden) continue;
-    const loc=locate(tr,t); if(!loc) continue;
+    const loc=locate(tr, t-delayOf(data.rosenName,tr)); if(!loc) continue;
     keep.add('tr'+k);
     const base= loc.state==='stop'? yOf(loc.idx) : (yOf(loc.from)+yOf(loc.to))/2;
     // 並び順キー: 走行中＝次駅に着く推定時刻、停車中＝発車時刻（早いほど先行。同じ駅間では追い越せない）
@@ -816,11 +846,12 @@ function renderPos(t){
         // 複々線表示では幅が足りないので、種別マークは2行目（行先の前）に置く
         el.innerHTML=`<svg class="chev" style="fill:${c}"><use href="#${tr.down?'chevDn':'chevUp'}"/></svg>
           <div class="lbl"><div class="no">${LAYOUT?'':mk}${esc(tr.trainNo)}[<span class="cc"></span>]</div>
-          <div class="dest">${LAYOUT?mk:''}${dst}</div></div>`;
+          <div class="dest">${LAYOUT?mk:''}${dst}<span class="dl"></span></div></div>`;
         g.appendChild(el);
       }
       el.style.top=y+'px';
       if(tr.down){ el.style.left=`calc(${rx}% + ${off}px)`; el.style.right=''; } else { el.style.right=`calc(${100-rx}% + ${off}px)`; el.style.left=''; }
+      { const dm=delayOf(data.rosenName,tr)/60; el.querySelector('.dl').textContent= dm>0? ` ${dm}分遅れ` : ''; }
       const g2=segAt(tr,at); el.querySelector('.cc').textContent= g2&&g2.cars!=null? g2.cars : tr.cars;
       el.classList.toggle('mult', !!(g2&&g2.units.length>1));
     });
@@ -858,7 +889,7 @@ function closeModal(){ $('modalbg').classList.remove('show'); selected=null; }
 $('modalbg').onclick=e=>{ if(e.target===$('modalbg')) closeModal(); };
 function renderModal(t){
   const tr=data.dias[posDia].trains[selected]; if(!tr) return;
-  const loc=locate(tr,t);
+  const loc=locate(tr, t-delayOf(data.rosenName,tr));
   const dest=tr.destIdx!=null? data.stations[tr.destIdx].name:'';
   const head=!loc?'運行時間外': loc.state==='stop'? `${data.stations[loc.idx].name}` : `${data.stations[loc.from].name}→${data.stations[loc.to].name}`;
   const last=tr.stops[tr.stops.length-1];
@@ -871,7 +902,7 @@ function renderModal(t){
   $('modal').innerHTML=`<div class="mh"><span>${esc(head)}</span><button id="mclose" aria-label="閉じる">×</button></div>
     <div class="mb">
       <div class="l1"><span class="num">${esc(tr.trainNo)}</span> <span class="typ">[${esc(tr.type.name)}]</span> ${esc(dest)}</div>
-      <div class="l2">${carsLabel(tr)}両編成　<span style="color:#666;font-size:14px">運用 ${esc(tr.opNo)}</span></div>
+      <div class="l2">${carsLabel(tr)}両編成　<span style="color:#666;font-size:14px">運用 ${esc(tr.opNo)}</span>${delayHtml(data.rosenName,tr)}</div>
       ${consistHtml(tr, data.stations)}
       <table><thead><tr><th>駅</th><th style="text-align:right">着</th><th style="text-align:right">発</th><th>番線</th></tr></thead><tbody>${rows}</tbody></table>
       ${tr.bikou?`<p class="bikou">備考: ${esc(tr.bikou)}</p>`:''}</div>`;
@@ -1016,7 +1047,7 @@ function renderSTT(){
   const byHour={}; for(const d of deps){ const hh=Math.floor(d.t/3600); (byHour[hh]=byHour[hh]||[]).push(d); }
   const hours=Object.keys(byHour).map(Number).sort((a,b)=>a-b);
   if(!hours.length){ $('sttBody').innerHTML=`<p style="color:#666;padding:12px">${allDeps.length?'条件に合う列車はありません。':'この方面の発車はありません。'}</p>`; return; }
-  let h='';
+  let h=''; const today=ttState.dia===pickDia(data.dias);
   for(const hh of hours){
     h+=`<div class="krow"><div class="khr">${hh}</div><div class="kcells">`;
     for(const d of byHour[hh]){
@@ -1025,7 +1056,7 @@ function renderSTT(){
       const dest=d.x.destIdx!=null?data.stations[d.x.destIdx].name:'';
       const trk=trackName(d.s), first=(d.s===d.x.first);
       h+=`<div class="kd ${col?'':'plain'}" style="${col?`background:${col}`:''}" data-k="${dia.trains.indexOf(d.x)}" title="${esc(d.x.type.name)} ${esc(d.x.trainNo)}">
-        <span class="dst">${esc(dest)}</span><span class="m">${mm}</span>
+        <span class="dst">${esc(dest)}</span>${today&&delayOf(data.rosenName,d.x)>0?`<span class="dly">+${delayOf(data.rosenName,d.x)/60}分</span>`:''}<span class="m">${mm}</span>
         <span class="bot"><span class="trk"><b>${esc(trk)}</b>${first?'始':''}</span><span class="cars">${carsAt(d.x,si)}</span></span></div>`;
     }
     h+=`</div></div>`;
@@ -1048,7 +1079,7 @@ function openTrainInfo(tr){
   $('modal').innerHTML=`<div class="mh"><span>${esc(tr.type.name)} ${esc(dest)}行</span><button id="mclose" aria-label="閉じる">×</button></div>
     <div class="mb">
       <div class="l1"><span class="num">${esc(tr.trainNo)}</span> <span class="typ">[${esc(tr.type.name)}]</span> ${esc(dest)}</div>
-      <div class="l2">${carsLabel(tr)}両編成　<span style="color:#666;font-size:14px">運用 ${esc(tr.opNo)}</span></div>
+      <div class="l2">${carsLabel(tr)}両編成　<span style="color:#666;font-size:14px">運用 ${esc(tr.opNo)}</span>${ttState.dia===pickDia(data.dias)?delayHtml(data.rosenName,tr):''}</div>
       ${consistHtml(tr, data.stations)}
       <table><thead><tr><th>駅</th><th style="text-align:right">着</th><th style="text-align:right">発</th><th>番線</th><th style="text-align:right">運賃</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="bikou">運賃は ${esc(data.stations[ttState.st].name)} からの金額</p>
@@ -1098,6 +1129,7 @@ function routeEnter(){
   if(!$('rtDate').value){ const d=opDate(); $('rtDate').value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
   if(!$('rtTime').value){ const t=now%86400; $('rtTime').value=`${String(Math.floor(t/3600)).padStart(2,'0')}:${String(Math.floor(t%3600/60)).padStart(2,'0')}`; }
 }
+function rtIsToday(){ return opDateKey(rtDateObj())===opDateKey(); }
 function rtDateObj(){ const v=$('rtDate').value; if(!v) return opDate(); const [y,m,d]=v.split('-').map(Number); return new Date(y,m-1,d,12); }
 $('rtModes').querySelectorAll('button').forEach(b=>b.onclick=()=>{ rtMode=b.dataset.m; $('rtModes').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); $('rtTimeRow').style.display=(rtMode==='dep'||rtMode==='arr')?'':'none'; });
 $('rtPref').querySelectorAll('button').forEach(b=>b.onclick=()=>{ rtPref=b.dataset.p; $('rtPref').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); });
@@ -1122,10 +1154,11 @@ function buildConnections(){
   const conns=[], nodes={}, byName={};
   const node=(ri,idx)=>{ const k=ri+':'+idx; if(!(k in nodes)){ nodes[k]={ri,idx,name:routeData(ri).stations[idx].name}; (byName[nodes[k].name]=byName[nodes[k].name]||[]).push(k);} return k; };
   const date=rtDateObj(), hol=isHolidayDia(date);
+  const today=rtIsToday();
   ROUTES.forEach((r,ri)=>{ const d=routeData(ri); let di=d.dias.findIndex(x=>hol?x.holiday:!x.holiday); if(di<0) di=0; const dia=d.dias[di];
     for(const tr of dia.trains){
-      const st=tr.stops.filter(z=>z.kind===1&&z.arr!=null);
-      for(let i=0;i<st.length-1;i++) conns.push({dep:st[i].dep, arr:st[i+1].arr, from:node(ri,st[i].idx), to:node(ri,st[i+1].idx), trip:tr, ri, fs:st[i], ts:st[i+1]});
+      const st=tr.stops.filter(z=>z.kind===1&&z.arr!=null), dl= today? delayOf(d.rosenName,tr) : 0;
+      for(let i=0;i<st.length-1;i++) conns.push({dep:st[i].dep+dl, arr:st[i+1].arr+dl, from:node(ri,st[i].idx), to:node(ri,st[i+1].idx), trip:tr, ri, fs:st[i], ts:st[i+1]});
     } });
   conns.sort((a,b)=>a.dep-b.dep||a.arr-b.arr);
   return {conns,nodes,byName};
@@ -1228,7 +1261,7 @@ function renderJourneys(list, fromName, toName){
       const trkT=(lg.ts.track!=null&&d.stations[toSt.idx].tracks[lg.ts.track])||'';
       h+=`<div class="jst"><span>${fmtM(lg.dep)}</span><span class="dot"></span><span>${esc(fromSt.name)}${trkF?`<span class="trk">${esc(trkF)}番線</span>`:''}</span></div>`;
       h+=`<div class="jleg"><span></span><span class="bar" style="background:${c}"></span>
-        <div class="info" data-j="${ji}" data-l="${li}">${mark?`<span class="mk" style="background:${c}">${esc(mark)}</span>`:''}<b>${esc(d.rosenName)} ${esc(lg.trip.type.name)} ${esc(dest)}行</b><br>${esc(lg.trip.trainNo)}　${carsAt(lg.trip,fromSt.idx)}両${segAt(lg.trip,fromSt.idx)&&segAt(lg.trip,fromSt.idx).units.length>1?'（併結）':''}　${dur(lg.dep,lg.arr)}</div></div>`;
+        <div class="info" data-j="${ji}" data-l="${li}">${mark?`<span class="mk" style="background:${c}">${esc(mark)}</span>`:''}<b>${esc(d.rosenName)} ${esc(lg.trip.type.name)} ${esc(dest)}行</b>${rtIsToday()?delayHtml(d.rosenName,lg.trip):''}<br>${esc(lg.trip.trainNo)}　${carsAt(lg.trip,fromSt.idx)}両${segAt(lg.trip,fromSt.idx)&&segAt(lg.trip,fromSt.idx).units.length>1?'（併結）':''}　${dur(lg.dep,lg.arr)}</div></div>`;
       if(li<j.legs.length-1){ const nx=j.legs[li+1]; const same=nx.ri===lg.ri; const nxFrom=CONN.nodes[nx.from]; const walk=walkTargets(toSt.name).find(w=>w.name===nxFrom.name);
         h+=`<div class="jst"><span>${fmtM(lg.arr)}</span><span class="dot"></span><span>${esc(toSt.name)}${trkT?`<span class="trk">${esc(trkT)}番線</span>`:''}</span></div>
             <div class="jleg"><span></span><span></span><div class="jxfer" style="padding-left:0">${walk?`徒歩 ${Math.round(walk.sec/60)}分で ${esc(nxFrom.name)} へ`: same?'同じ駅で乗り継ぎ':'乗換'}（待ち ${dur(lg.arr,nx.dep)}）</div></div>`;
@@ -1255,7 +1288,7 @@ function openTrainInfoR(ri, tr, stIdx){
   }).join('');
   $('modal').innerHTML=`<div class="mh"><span>${esc(d.rosenName)} ${esc(tr.type.name)} ${esc(dest)}行</span><button id="mclose" aria-label="閉じる">×</button></div>
     <div class="mb"><div class="l1"><span class="num">${esc(tr.trainNo)}</span> <span class="typ">[${esc(tr.type.name)}]</span> ${esc(dest)}</div>
-      <div class="l2">${carsLabel(tr)}両編成　<span style="color:#666;font-size:14px">運用 ${esc(tr.opNo)}</span></div>
+      <div class="l2">${carsLabel(tr)}両編成　<span style="color:#666;font-size:14px">運用 ${esc(tr.opNo)}</span>${rtIsToday()?delayHtml(d.rosenName,tr):''}</div>
       ${consistHtml(tr, d.stations)}
       <table><thead><tr><th>駅</th><th style="text-align:right">着</th><th style="text-align:right">発</th><th>番線</th><th style="text-align:right">運賃</th></tr></thead><tbody>${rows}</tbody></table>
       <p class="bikou">運賃は ${esc(d.stations[stIdx].name)} からの金額</p></div>`;
@@ -1272,6 +1305,8 @@ function setRoute(i){
   updateHourOptions();
 }
 setRoute(0); go('home');
+loadDelays().then(()=>{ if(document.getElementById('pg-pos').classList.contains('show')) refresh(); });
+setInterval(()=>loadDelays().then(()=>{ if(document.getElementById('pg-pos').classList.contains('show')) refresh(); }), 60000);
 </script>
 </body>
 </html>
