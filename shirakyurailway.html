@@ -1001,6 +1001,8 @@ function applySuspensionsAll(routeName, d, dia){
     const ts=msToOpSec(r.stopAt), active=!r.resumeAt||r.resumeAt>nowMs, until= active? Infinity : msToOpSec(r.resumeAt);
     const holdEnd= active? now+60 : until;
     let Tdn=-1, Tup=-1; for(const i of tb){ if(i<=lo) Tdn=i; if(i>=hi&&Tup<0) Tup=i; }
+    // 一部区間で再開して残った見合わせ区間: 再開した側は、再開区間の限界の駅まで走ってそこで折り返す（行先もその駅）
+    if(active&&r.evFrom!==undefined&&tb.length){ const [olo,ohi]=secRange({from:r.evFrom,to:r.evTo},S); if(lo>olo) Tdn=lo; if(hi<ohi) Tup=hi; }
     const canTurn= Tdn>=0&&Tup>=0;
     const tin = dir=> dir>0? (canTurn?Tdn:lo) : (canTurn?Tup:hi);     // 向かってくる列車が止まる（折り返す）駅
     const tout= dir=> canTurn? (dir>0?Tup:Tdn) : null;                // 区間を抜けた先の折り返し駅
@@ -1086,6 +1088,26 @@ function applySuspensionsAll(routeName, d, dia){
         if(head.length&&head[head.length-1].idx===idx){ const z=head[head.length-1]; head[head.length-1]={...z, dep:z.arr+30}; }
         E.stops=[...head, first, ...tail]; E.hasTail=true; E.tailFrom=idx; E.mod=true;
       }
+    }
+  }
+  // 運転再開などで動き出す列車は、同じ駅・同じ方向の前の列車の発車（通過）から最低 RESTART_GAP 秒あける
+  if(rules.length) spaceDepartures(T, S);
+
+}
+const RESTART_GAP = 45;
+function spaceDepartures(T, S){
+  const fragEnd=(st,k)=> k===st.length-1 || !!st[k+1].brk;          // 終着（折り返し）なので発車しない
+  const shift=(st,k,sh)=>{ st[k]={...st[k], dep:st[k].dep+sh}; for(let i=k+1;i<st.length&&!st[i].brk;i++) st[i]={...st[i], arr:st[i].arr+sh, dep:st[i].dep+sh}; };
+  for(const dir of [1,-1]){
+    const TR=T.filter(x=>(x.down?1:-1)===dir&&x._eff.stops.length>1);
+    for(let n=0;n<S.length;n++){
+      const idx= dir>0? n : S.length-1-n, ev=[];
+      for(const x of TR){ const st=x._eff.stops; for(let k=0;k<st.length;k++) if(st[k].idx===idx&&!fragEnd(st,k)) ev.push({x,k}); }
+      ev.sort((a,b)=>a.x._eff.stops[a.k].dep-b.x._eff.stops[b.k].dep);
+      let prev=null;
+      for(const e of ev){ const st=e.x._eff.stops;
+        if(prev&&(e.x._eff.mod||prev.x._eff.mod)){ const need=prev.t+RESTART_GAP; if(st[e.k].dep<need){ shift(st,e.k,need-st[e.k].dep); e.x._eff.mod=true; } }
+        prev={x:e.x, t:st[e.k].dep}; }
     }
   }
 }
