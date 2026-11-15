@@ -85,13 +85,18 @@
   .tr .dest{font-size:14px;color:#222}
   .tr .dl{color:#d00;font-weight:700}
   .alert{background:#fff0f0;border-bottom:2px solid #d00;color:#a00;padding:8px 12px;font-size:14px;line-height:1.5;cursor:pointer}
-  .opinfo{margin:8px 10px 40px;border:2px solid #d00;border-radius:12px;background:#fff8f8;padding:10px 12px}
-  .opinfo h3{margin:0 0 6px;font-size:16px;color:#a00}
-  .opinfo .oi{padding:8px 0;border-top:1px dashed #e8b4b4}
+  /* 運行情報: 画面の下の方に透かしのように重ねて表示（タップは下の路線図に通す） */
+  .opinfo{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom));z-index:30;
+    width:min(calc(100% - 24px),560px);box-sizing:border-box;max-height:32vh;overflow:hidden;pointer-events:none;
+    background:rgba(255,248,248,.72);border:1.5px solid rgba(208,0,0,.45);border-radius:12px;padding:8px 12px;
+    box-shadow:0 2px 10px rgba(0,0,0,.06)}
+  .opinfo h3{margin:0 0 4px;font-size:13px;color:rgba(170,0,0,.85);letter-spacing:.1em}
+  .opinfo .oi{padding:5px 0;border-top:1px dashed rgba(200,100,100,.4)}
   .opinfo .oi:first-of-type{border-top:0}
-  .opinfo .oi-ev{font-size:16px;font-weight:700;color:#111}
-  .opinfo .oi-st{font-size:14px;color:#333;margin-top:3px}
-  .opinfo .ost{display:inline-block;color:#fff;border-radius:4px;padding:1px 8px;margin-right:6px;font-size:13px;font-weight:700}
+  .opinfo .oi-ev{font-size:14px;font-weight:700;color:rgba(17,17,17,.85)}
+  .opinfo .oi-st{font-size:12px;color:rgba(40,40,40,.85);margin-top:2px}
+  .opinfo .ost{display:inline-block;color:#fff;border-radius:4px;padding:0 6px;margin-right:6px;font-size:11px;font-weight:700;opacity:.9}
+  #pg-pos.has-info .track{padding-bottom:30vh}
   .opinfo .ost.sus{background:#d00} .opinfo .ost.dly{background:#e07b00}
   .alert div+div{margin-top:6px;padding-top:6px;border-top:1px dashed #e8b4b4}
   .alert b{color:#fff;background:#d00;border-radius:4px;padding:1px 6px;font-size:13px}
@@ -1057,14 +1062,14 @@ function opInfos(routeName){
 }
 function renderAlert(){
   const list=opInfos(data.rosenName), top=$('posAlert'), box=$('posInfo');
+  const pg=box.closest('section'); if(pg) pg.classList.toggle('has-info', !!list.length);
   if(!list.length){ top.classList.add('hidden'); box.classList.add('hidden'); box.innerHTML=''; return; }
   const sus=list.some(x=>x.active);
-  top.innerHTML=`<b>${sus?'運休':'遅延'}</b>　運行情報があります（詳しくは下へ）`; top.classList.remove('hidden');
+  top.innerHTML=`<b>${sus?'運休':'遅延'}</b>　運行情報があります（画面下に表示）`; top.classList.remove('hidden');
   box.innerHTML=`<h3>運行情報</h3>`+list.map(x=>`<div class="oi"><div class="oi-ev">${esc(eventText(x.r)||'（理由未設定）')}</div>
     <div class="oi-st"><span class="ost ${x.active?'sus':'dly'}">${x.status}</span>${esc(x.who)}　${x.active?`${hm(x.r.stopAt)}から運転を見合わせています`:`${x.min}分程度の遅れ`}</div></div>`).join('');
   box.classList.remove('hidden');
 }
-$('posAlert').onclick=()=>{ const b=$('posInfo'); if(b) window.scrollTo({top:b.getBoundingClientRect().top+window.scrollY-120, behavior:'smooth'}); };
 function renderPos(t){
   renderAlert();
   curT=t;
