@@ -704,6 +704,7 @@ function locate(train, t){
     const s=st[i];
     if(now>=s.arr&&now<=s.dep&&s.kind===1) return {state:'stop', idx:s.idx, stop:s, now};
     const nx=st[i+1]; if(!nx) break;
+    if(nx.brk) continue;                                  // 折り返し運転で分かれた前後の間は走っていない
     if(now>s.dep&&now<nx.arr){
       // 時刻のある2駅 s→nx の間を、駅間ごとの標準所要時間で按分して、今どの駅間にいるかを推定
       const dir=train.down?1:-1, segs=[];
@@ -783,7 +784,11 @@ function inSection(routeName, r, tr){
   return lo===hi? (tlo<=lo&&lo<=thi) : Math.max(lo,tlo)<Math.min(hi,thi);
 }
 // 表示用の事象文「○○駅〜○◇駅 人身事故が発生」
-function eventText(r){ if(r.ev) return `${r.from&&r.to? (r.from===r.to? `${r.from}駅`:`${r.from}駅〜${r.to}駅`)+' ' : ''}${r.ev}が発生`; return r.note||''; }
+// 一部区間で運転を再開した設定は、事象の場所として元の区間（evFrom〜evTo）を使う
+function secText(f,t){ return f&&t? (f===t? `${f}駅`:`${f}駅〜${t}駅`) : ''; }
+function eventText(r){ if(r.ev){ const s= r.evFrom!==undefined? secText(r.evFrom,r.evTo) : secText(r.from,r.to); return `${s?s+' ':''}${r.ev}が発生`; } return r.note||''; }
+function ruleRank(r){ const now=Date.now(), act=r.stopAt&&now>=r.stopAt&&(!r.resumeAt||now<r.resumeAt); return (act?1e9:0)+ruleSec(r); }   // 見合わせ中を最優先、次に遅れの大きい方
+function ruleSec(r){ const now=Date.now(); let sus=0; if(r.stopAt&&now>=r.stopAt){ const end=r.resumeAt? Math.min(r.resumeAt,now) : now; sus=Math.max(0,(end-r.stopAt)/1000); } return Math.max(0,+r.min||0)*60+sus; }
 function delayRule(routeName, tr){
   if(!tr||DELAYS.date!==opDateKey()) return null;
   let best=null, bs=-1;
@@ -794,7 +799,8 @@ function delayRule(routeName, tr){
     if(r.train && r.train!==tr.trainNo) continue;
     if(!inSection(routeName,r,tr)) continue;
     const sc=(r.train?8:0)+(r.type?4:0)+(r.dir?2:0)+(r.from&&r.to?1:0);
-    if(sc>bs){ bs=sc; best=r; }
+    // 同じ細かさなら遅れの大きい方（一部区間だけ再開したとき、まだ見合わせ中の区間にかかる列車は止まったまま）
+    if(sc>bs||(sc===bs&&ruleRank(r)>ruleRank(best))){ bs=sc; best=r; }
   }
   return best;
 }
@@ -808,9 +814,9 @@ function delayParts(routeName, tr){
 }
 function delayOf(routeName, tr){ const p=delayParts(routeName,tr); return p? p.sec : 0; }
 function delayMin(routeName, tr){ return Math.floor(delayOf(routeName,tr)/60); }
-function delayShort(routeName, tr){ const p=delayParts(routeName,tr); if(p&&p.active) return '運休中'; const m=Math.floor(effDelayNow(routeName,tr)/60); return m>0? `${m}分遅れ` : ''; }
-function delayHtml(routeName, tr){ const p=delayParts(routeName,tr); const t=delayShort(routeName,tr); if(!t) return '';
-  const ev=p? eventText(p.r) : ''; return `<span class="dlabel">${t}</span>${ev?`<span class="dnote">${esc(ev)}</span>`:''}`; }
+function delayShort(routeName, tr){ if(susNow(routeName,tr)) return '運休中'; const m=Math.floor(effDelayNow(routeName,tr)/60); return m>0? `${m}分遅れ` : ''; }
+function delayHtml(routeName, tr){ const t=delayShort(routeName,tr); if(!t) return '';
+  const sr=susNow(routeName,tr), p=delayParts(routeName,tr), ev= sr? eventText(sr) : p? eventText(p.r) : ''; return `<span class="dlabel">${t}</span>${ev?`<span class="dnote">${esc(ev)}</span>`:''}`; }
 /* ========== 自動遅延（シミュレーション） ========== */
 // admin.html で ON にすると、日付と列番から決まる乱数で「それらしい遅れ」を作る（全員に同じ遅れが見える）。
 // ・始発で遅れが出る（朝夕のラッシュは出やすく大きめ）。まれに途中駅で停車が延びる
@@ -933,7 +939,164 @@ function overtakesOf(d, dia){
   events.sort((a,b)=>a.sdep-b.sdep);
   return dia._ovt={events, spots};
 }
-// 実際に走る時刻（自動遅延＋admin の遅れ＋退避での待ち）を列車ごとに作る。表示のたびに作り直す
+/* ---- 運転見合わせ（区間）---- */
+// 見合わせ開始の時点で区間の中にいた列車はその場で止まる。まだ区間に入っていない列車は、区間の手前の駅まで走って待つ。
+// 一部区間だけ再開したときは、再開した区間の列車は動き出し、見合わせが続く区間の手前の駅で待つ
+function msToOpSec(ms){ return nowSec()+(ms-Date.now())/1000; }
+function ruleMatchTrain(r,tr){ return !(r.dir&&r.dir!==(tr.down?'down':'up')) && !(r.type&&r.type!==tr.type.name) && !(r.train&&r.train!==tr.trainNo); }
+function secRange(r,S){ if(r.from&&r.to){ const a=S.findIndex(x=>x.name===r.from), b=S.findIndex(x=>x.name===r.to); if(a>=0&&b>=0) return [Math.min(a,b),Math.max(a,b)]; } return [0,S.length-1]; }
+// admin の「○分」だけの遅れ（見合わせで止まった時間は applySuspensions で扱う）
+function baseDelaySec(routeName,tr){
+  if(!tr||DELAYS.date!==opDateKey()) return 0;
+  let best=null, bs=-1, sm=0;
+  for(const r of (DELAYS.rules||[])){
+    if(r.route!==routeName||!ruleMatchTrain(r,tr)||!inSection(routeName,r,tr)) continue;
+    if(r.stopAt){ sm=Math.max(sm,+r.min||0); continue; }
+    const sc=(r.train?8:0)+(r.type?4:0)+(r.dir?2:0)+(r.from&&r.to?1:0); if(sc>bs){ bs=sc; best=r; }
+  }
+  return Math.max(best?(+best.min||0):0, sm)*60;
+}
+// 折り返しできる駅と番線（'*' は全番線）。運転見合わせ中は、見合わせ区間の手前の折り返し駅で折り返し運転する
+const TURNBACK = {
+  '青波高速鉄道線': { '青波中央':'*', '港が丘':['2','3'], '朝日ヶ丘':['3'], '高輪平':['3'], '花咲野':['3','4'], '船渡川':['3','4'], '茶志内':'*' },
+  '青波メトロ':     { '船渡川橋':'*', '羽越台':['3'], '光川':'*' },
+};
+const TURN_TIME = 90;    // 折り返しに必要な最短時間（秒）
+function isTurnback(routeName, stName){ const t=TURNBACK[routeName]; return !!(t&&t[stName]); }
+function turnTrack(routeName, S, idx, cur){
+  const allow=(TURNBACK[routeName]||{})[S[idx].name]; if(!allow||allow==='*') return cur;
+  const nm=k=>String(S[idx].tracks[k]??'').replace(/番線?$/,'');
+  if(cur!=null&&allow.includes(nm(cur))) return cur;
+  const i=S[idx].tracks.findIndex((_,k)=>allow.includes(nm(k))); return i>=0? i : cur;
+}
+// 見合わせの対象区間。一部区間で再開した区間は、再開までは分ける前の区間（pFrom〜pTo）全体が止まっていた
+function susRange(r,S){ if(r.resumeAt&&r.pFrom!==undefined) return secRange({from:r.pFrom,to:r.pTo},S); return secRange(r,S); }
+// 列車の止め方（運転見合わせ）
+// ・当該列車（admin で指定）はその場で止まる。後ろの列車は当該列車を追い越せないので、追いついた位置で止まる
+// ・見合わせ区間とその手前（折り返し駅まで）にいた列車は、次の停車駅まで走ってそこで待つ
+// ・区間に向かってくる列車は、手前の折り返し駅で折り返す（折り返し駅がない路線は区間の手前の駅で待つ）
+// ・区間の向こう側へ抜ける列車の続き（折り返し駅から先）は、折り返してきた反対方向の列車で運転する
+// ・運転再開後は、待っていた列車が止まっていた時間の分だけ遅れて走る
+function applySuspensionsAll(routeName, d, dia){
+  if(DELAYS.date!==opDateKey()) return;
+  const S=d.stations, segRun=d.segRun, nowMs=Date.now(), now=nowSec();
+  const tb=S.map((s,i)=>isTurnback(routeName,s.name)?i:-1).filter(i=>i>=0);
+  const rules=(DELAYS.rules||[]).filter(r=>r.route===routeName&&r.stopAt&&r.stopAt<=nowMs)
+    .sort((a,b)=>(a.stopAt-b.stopAt)||((a.resumeAt||Infinity)-(b.resumeAt||Infinity)));
+  const T=dia.trains.filter(x=>x._eff);
+  const headLen=st=>{ const i=st.findIndex((z,k)=>k>0&&z.brk); return i<0? st.length : i; };
+  const hold=(x,k,to)=>{ const st=x._eff.stops, n=headLen(st); if(to<=st[k].dep) return; const sh=to-st[k].dep; st[k]={...st[k], dep:to, kind:1}; for(let i=k+1;i<n;i++){ st[i].arr+=sh; st[i].dep+=sh; } };
+  const ensureStop=(x,idx)=>{ const st=x._eff.stops, n=headLen(st), dir=x.down?1:-1; const h=st.slice(0,n);
+    let k=h.findIndex(z=>z.idx===idx); if(k>=0) return k;
+    const te=timeAtStops(h,idx,x.down,segRun); if(!te) return -1;
+    k=h.findIndex(z=>(z.idx-idx)*dir>0); if(k<0) return -1;
+    st.splice(k,0,{idx, kind:1, arr:te.arr, dep:te.dep, track:null, synth:true}); return k; };
+  // 他の見合わせ設定がかかっている区間は、その再開まで続きの列車を出さない
+  const spans=rules.map(r=>{ const [lo,hi]=susRange(r,S); return {r, lo, hi, ts:msToOpSec(r.stopAt), until:(!r.resumeAt||r.resumeAt>nowMs)? Infinity : msToOpSec(r.resumeAt)}; });
+  const blockedTill=(self, a, b, t)=>{ let u=t; const l=Math.min(a,b), h=Math.max(a,b);
+    for(const sp of spans){ if(sp.r===self||sp.ts>u) continue; if(Math.max(sp.lo,l)<Math.min(sp.hi,h)||(sp.lo===sp.hi&&l<=sp.lo&&sp.lo<=h)) u=Math.max(u, sp.until); } return u; };
+  const cutHead=(x,k)=>{ const st=x._eff.stops, n=headLen(st); st.splice(k+1, n-k-1); };
+  for(const r of rules){
+    const [lo,hi]=susRange(r,S), single=lo===hi;
+    const ts=msToOpSec(r.stopAt), active=!r.resumeAt||r.resumeAt>nowMs, until= active? Infinity : msToOpSec(r.resumeAt);
+    const holdEnd= active? now+60 : until;
+    let Tdn=-1, Tup=-1; for(const i of tb){ if(i<=lo) Tdn=i; if(i>=hi&&Tup<0) Tup=i; }
+    const canTurn= Tdn>=0&&Tup>=0;
+    const tin = dir=> dir>0? (canTurn?Tdn:lo) : (canTurn?Tup:hi);     // 向かってくる列車が止まる（折り返す）駅
+    const tout= dir=> canTurn? (dir>0?Tup:Tdn) : null;                // 区間を抜けた先の折り返し駅
+    const pEnd= dir=> dir>0? hi+(single?0.5:0) : -(lo-(single?0.5:0));
+    const cause= r.cause? T.find(x=>x.trainNo===r.cause) : null;
+    let causeP=null; if(cause){ const l=effLocate(cause,ts); if(l) causeP= l.state==='stop'? l.idx : (l.from+l.to)/2; }
+    const supply={}, demand={};
+    const addDemand=(x,dir)=>{ const to=tout(dir); if(to==null||x._eff.hasTail) return;
+      if(!((x.lastStop.idx-to)*dir>0&&(x.first.idx-to)*dir<0)) return;
+      const b=timeAtStops(x._eff.base,to,x.down,segRun); if(!b||b.dep<ts) return;
+      (demand[to]=demand[to]||[]).push({x, t:b.dep}); };
+    for(const x of T){
+      if(!ruleMatchTrain(r,x)) continue;
+      const E=x._eff, dir=x.down?1:-1;
+      const tlo=Math.min(x.first.idx,x.lastStop.idx), thi=Math.max(x.first.idx,x.lastStop.idx);
+      if(!(single? (tlo<=lo&&lo<=thi) : Math.max(lo,tlo)<Math.min(hi,thi))) continue;   // 区間を通らない
+      if(!E.stops.length) continue;
+      const loc=effLocate(x,ts), st=E.stops;
+      const pos= loc? (loc.state==='stop'? loc.idx : (loc.from+loc.to)/2)*dir : null;
+      const pIn=tin(dir)*dir;
+      if(!loc && st[headLen(st)-1].arr<ts) continue;                                   // 見合わせ前に走り終えた
+      if(loc && pos>=pEnd(dir)) continue;                                               // もう区間を抜けた
+      if(x===cause && loc){                                                              // 当該列車: その場で止まる
+        const end= active? now : until, F=E.freeze;
+        if(F&&F.from===ts){ const ext=end-(F.end||ts); if(ext>0){ for(const z of st){ if(z.arr>ts) z.arr+=ext; if(z.dep>ts) z.dep+=ext; } F.end=end; F.to= active? Infinity : end; } }
+        else if(!F){ const D=end-ts; if(D>0){ const pre=st.map(z=>({...z})); for(const z of st){ if(z.arr>ts) z.arr+=D; if(z.dep>ts) z.dep+=D; } E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
+        if(active){ E.susRule=r; E.susFrom=ts; } E.mod=true; addDemand(x,dir); continue;
+      }
+      if(loc && pos>pIn){                                                                // 区間（と手前）の中: 次の停車駅まで走って待つ
+        const n=headLen(st); let k;
+        if(loc.state==='stop') k=st.findIndex(z=>z.idx===loc.idx);
+        else k=st.findIndex((z,i)=>i<n&&z.kind===1&&z.idx*dir>pos);
+        if(k<0||k>=n) continue;
+        if(loc.state!=='stop'&&st[k].idx*dir>=pEnd(dir)) continue;                        // 次の停車駅が区間の外 → そのまま抜けていく
+        const blocked= cause&&cause!==x&&cause.down===x.down&&causeP!=null&&causeP*dir>pos&&causeP*dir<=st[k].idx*dir;
+        if(blocked&&loc.state!=='stop'){                                                 // 当該列車に阻まれて駅まで行けない → その場で止まる
+          if(!E.freeze){ const end= active? now : until, D=end-ts; if(D>0){ const pre=st.map(z=>({...z})); for(const z of st){ if(z.arr>ts) z.arr+=D; if(z.dep>ts) z.dep+=D; } E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
+          if(active){ E.susRule=r; E.susFrom=ts; }
+        } else {
+          hold(x,k,holdEnd); if(active){ E.susRule=r; E.susFrom=E.stops[k].arr; }
+        }
+        E.mod=true; addDemand(x,dir); continue;
+      }
+      // ここから先は、まだ区間（と手前）に入っていない列車
+      if(E.termAt!=null) continue;
+      const started= !!loc || st[0].dep<=ts;
+      const org=x.first.idx*dir;
+      if(!started && org>pIn){                                                           // 始発駅が区間の中: 始発駅で待つ
+        hold(x,0,holdEnd); if(active){ E.susRule=r; E.susFrom=st[0].arr; } E.mod=true; addDemand(x,dir); continue;
+      }
+      const Tn=tin(dir);
+      if(canTurn){                                                                       // 手前の折り返し駅で折り返す
+        if(x.first.idx===Tn){                                                            // 折り返し駅始発で区間へ向かう列車は運休（車両は反対方向に回す）
+          if(st[0].dep<until){ (supply[Tn]=supply[Tn]||[]).push(st[0].dep); E.stops=E.stops.slice(headLen(st)); if(E.stops.length&&E.stops[0].brk) E.stops[0]={...E.stops[0]}; E.cancel=true; E.mod=true; addDemand(x,dir); }
+          continue;
+        }
+        const k=ensureStop(x,Tn); if(k<0) continue;
+        const s=E.stops[k]; if(s.arr>=until) continue;                                  // 再開後に着く列車はそのまま
+        cutHead(x,k); E.stops[k]={...s, dep:s.arr+30, kind:1, track:turnTrack(routeName,S,Tn,s.track)};
+        E.termAt=Tn; E.termK=k; (supply[Tn]=supply[Tn]||[]).push(s.arr+TURN_TIME); E.mod=true; addDemand(x,dir);
+      } else {                                                                           // 折り返せない: 区間の手前の駅で待つ
+        const k=ensureStop(x,Tn); const kk= k<0? 0 : k;
+        if(E.stops[kk].dep<ts) continue;
+        if(active&&E.stops[kk].arr>now) continue;
+        hold(x,kk,holdEnd); if(active){ E.susRule=r; E.susFrom=E.stops[kk].arr; } E.mod=true;
+      }
+    }
+    // 区間を抜けた先の続きを、折り返してきた列車で運転する（早く折り返せた列車から順に）
+    for(const to in demand){
+      const sup=(supply[to]||[]).sort((a,b)=>a-b), L=demand[to].sort((a,b)=>a.t-b.t);
+      for(const dm of L){
+        if(!sup.length) break;
+        let dep=Math.max(dm.t, sup[0]); if(dep>=until) continue;
+        dep=blockedTill(r, +to, dm.x.lastStop.idx, dep); if(!isFinite(dep)||dep>=until) continue;
+        sup.shift();
+        const x=dm.x, E=x._eff, idx=+to, b=E.base, dir=x.down?1:-1;
+        const bt=timeAtStops(b,idx,x.down,segRun), sh=dep-bt.dep;
+        const tail=b.filter(z=>(z.idx-idx)*dir>0).map(z=>({...z, arr:z.arr+sh, dep:z.dep+sh}));
+        const first={idx, kind:1, arr:dep-30, dep, track:turnTrack(routeName,S,idx,(b.find(z=>z.idx===idx)||{}).track), brk:true};
+        const st=E.stops, n=headLen(st); const h=st.slice(0,n);
+        const kc=h.findIndex(z=>(z.idx-idx)*dir>=0);
+        let head= kc<0? h : h.slice(0, h[kc].idx===idx? kc+1 : kc);
+        if(head.length&&head[head.length-1].idx===idx){ const z=head[head.length-1]; head[head.length-1]={...z, dep:z.arr+30}; }
+        E.stops=[...head, first, ...tail]; E.hasTail=true; E.tailFrom=idx; E.mod=true;
+      }
+    }
+  }
+}
+// 今の行先（折り返し運転中は折り返し駅）
+function effDestIdx(routeName, tr, t){ ensureEff(routeName); const E=tr._eff; if(!E||E.termAt==null) return tr.destIdx;
+  const z=E.stops[E.termK]; return z&&t<=z.dep? E.termAt : tr.destIdx; }
+// その場で止まっている間は、止まった時点の位置を返す
+function effLocate(tr, t){ const E=tr._eff, F=E.freeze;
+  if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l) l.now=t; return l; }
+  return locate(effView(tr), t); }
+// 実際に走る時刻（自動遅延＋admin の遅れ＋見合わせ＋退避での待ち）を列車ごとに作る。表示のたびに作り直す
 const EFF_CACHE={};
 function effView(tr){ const v=Object.create(tr); v.stops=tr._eff.stops; return v; }
 function ensureEff(routeName){
@@ -944,13 +1107,16 @@ function ensureEff(routeName){
   for(const dd of d.dias) for(const x of dd.trains) delete x._eff;
   const dia=d.dias[pickDia(d.dias)];
   for(const x of dia.trains){ if(!x.first||!x.lastStop) continue;
-    const D=delayOf(routeName,x), base=withDwell(autoTrain(routeName,x).stops);
-    x._eff={stops:base.map(z=>({...z, arr:z.arr+D, dep:z.dep+D})), sched:withDwell(x.stops)}; }
+    const D=baseDelaySec(routeName,x), base=withDwell(autoTrain(routeName,x).stops);
+    const b0=base.map(z=>({...z, arr:z.arr+D, dep:z.dep+D}));
+    x._eff={stops:b0.map(z=>({...z})), base:b0, sched:withDwell(x.stops)}; }
+  applySuspensionsAll(routeName, d, dia);
   const {events, spots}=overtakesOf(d, dia);
   const hold=(S,i,t)=>{ const st=S._eff.stops, sh=t-st[i].dep; if(sh<=0) return; st[i].dep=t; for(let k=i+1;k<st.length;k++){ st[k].arr+=sh; st[k].dep+=sh; } };
   const actAt=(F,idx)=>timeAtStops(F._eff.stops, idx, F.down, d.segRun);
+  // ※見合わせで止まっている列車は追い越しの計算から外す
   for(const e of events){
-    const S=e.S, F=e.F; if(!S._eff||!F._eff) continue;
+    const S=e.S, F=e.F; if(!S._eff||!F._eff||S._eff.mod||F._eff.mod) continue;
     const fa=actAt(F,e.idx); if(!fa) continue;
     const late=fa.dep-e.fdep; if(late<=0) continue;            // 追い越す側が遅れていなければ時刻表どおり
     const st=S._eff.stops, i=st.findIndex(z=>z.idx===e.idx); if(i<0) continue;
@@ -965,15 +1131,18 @@ function ensureEff(routeName){
     }
   }
 }
-function locateEff(routeName, tr, t){ ensureEff(routeName); return tr._eff? locate(effView(tr), t) : locateAuto(routeName, tr, t-delayOf(routeName,tr)); }
+function locateEff(routeName, tr, t){ ensureEff(routeName); return tr._eff? effLocate(tr, t) : locateAuto(routeName, tr, t-delayOf(routeName,tr)); }
+// 今、見合わせで止まっているか（止まっていればその設定）
+function susNow(routeName, tr){ ensureEff(routeName); const E=tr._eff; if(!E) { const p=delayParts(routeName,tr); return p&&p.active? p.r : null; } return E.susRule&&nowSec()>=E.susFrom? E.susRule : null; }
 // 今の遅れ（秒）。停車中はその駅の発車の遅れ、走行中は次の駅の到着の遅れ
 function effDelayNow(routeName, tr){
   ensureEff(routeName); const E=tr._eff; if(!E) return delayOf(routeName,tr)+autoDelayNow(routeName,tr);
-  const t=nowSec(), S=E.stops, Z=E.sched, loc=locate(effView(tr),t);
+  const t=nowSec(), S=E.stops, Z=E.sched; if(!S.length) return 0; const loc=effLocate(tr,t);
   if(!loc) return t<S[0].dep? S[0].dep-Z[0].dep : S[S.length-1].arr-Z[Z.length-1].arr;
-  if(loc.state==='stop'){ const i=S.findIndex(z=>z.idx===loc.idx); return i<0?0: S[i].dep-Z[i].dep; }
+  const zt=i=>timeAtStops(Z,S[i].idx,tr.down,data&&data.segRun)||Z[Math.min(i,Z.length-1)];   // 時刻表の時刻（通過駅で止めた場合も）
+  if(loc.state==='stop'){ const i=S.findIndex(z=>z.idx===loc.idx); return i<0?0: S[i].dep-zt(i).dep; }
   const dir=tr.down?1:-1; let i=S.findIndex(z=>dir>0? z.idx>=loc.to : z.idx<=loc.to); if(i<0) i=S.length-1;
-  return S[i].arr-Z[i].arr;
+  return S[i].arr-zt(i).arr;
 }
 function hm(ms){ const d=new Date(ms); return `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`; }
 // 路線内で見合わせ中の設定（走行位置の上に出すお知らせ用）
@@ -1056,8 +1225,10 @@ function opInfos(routeName){
     const sus=r.stopAt&&now>=r.stopAt? Math.round(((r.resumeAt&&r.resumeAt<now? r.resumeAt:now)-r.stopAt)/60000) : 0;
     const min=(+r.min||0)+(active?0:sus);
     if(!active&&min<=0) return null;
-    const who= r.train? `${r.train}` : [r.dir==='down'?'下り':r.dir==='up'?'上り':'', r.type||''].join('')||'全列車';
-    return {r, active, status: active?'運休':'遅延', min, who};
+    let who= r.train? `${r.train}` : [r.dir==='down'?'下り':r.dir==='up'?'上り':'', r.type||''].join('')||'全列車';
+    const part= r.evFrom!==undefined && r.from && r.to;                 // 一部区間で再開した設定
+    if(part) who+=`（${r.from}〜${r.to}）`;
+    return {r, active, status: active?'運休':'遅延', min, who, resumed: part&&!active&&!!r.resumeAt};
   }).filter(Boolean).sort((a,b)=>(b.active-a.active));
 }
 function renderAlert(){
@@ -1067,7 +1238,7 @@ function renderAlert(){
   const sus=list.some(x=>x.active);
   top.innerHTML=`<b>${sus?'運休':'遅延'}</b>　運行情報があります（画面下に表示）`; top.classList.remove('hidden');
   box.innerHTML=`<h3>運行情報</h3>`+list.map(x=>`<div class="oi"><div class="oi-ev">${esc(eventText(x.r)||'（理由未設定）')}</div>
-    <div class="oi-st"><span class="ost ${x.active?'sus':'dly'}">${x.status}</span>${esc(x.who)}　${x.active?`${hm(x.r.stopAt)}から運転を見合わせています`:`${x.min}分程度の遅れ`}</div></div>`).join('');
+    <div class="oi-st"><span class="ost ${x.active?'sus':'dly'}">${x.status}</span>${esc(x.who)}　${x.active?`${hm(x.r.stopAt)}から運転を見合わせています`:x.resumed?`${hm(x.r.resumeAt)}に運転を再開しました（${x.min}分程度の遅れ）`:`${x.min}分程度の遅れ`}</div></div>`).join('');
   box.classList.remove('hidden');
 }
 function renderPos(t){
@@ -1106,12 +1277,13 @@ function renderPos(t){
         // 複々線表示では幅が足りないので、種別マークは2行目（行先の前）に置く
         el.innerHTML=`<svg class="chev" style="fill:${c}"><use href="#${tr.down?'chevDn':'chevUp'}"/></svg>
           <div class="lbl"><div class="no">${LAYOUT?'':mk}${esc(tr.trainNo)}[<span class="cc"></span>]</div>
-          <div class="dest">${LAYOUT?mk:''}${dst}<span class="dl"></span></div></div>`;
+          <div class="dest">${LAYOUT?mk:''}<span class="dn">${dst}</span><span class="dl"></span></div></div>`;
         g.appendChild(el);
       }
       el.style.top=y+'px';
       if(tr.down){ el.style.left=`calc(${rx}% + ${off}px)`; el.style.right=''; } else { el.style.right=`calc(${100-rx}% + ${off}px)`; el.style.left=''; }
-      { const t=delayShort(data.rosenName,tr); el.querySelector('.dl').textContent= t? ` ${t}` : ''; }
+      { const t=delayShort(data.rosenName,tr); el.querySelector('.dl').textContent= t? ` ${t}` : '';
+        const di=effDestIdx(data.rosenName,tr,nowSec()); el.querySelector('.dn').textContent= di!=null? data.stations[di].name+(di!==tr.destIdx?'（折返）':'') : ''; }
       const g2=segAt(tr,at); el.querySelector('.cc').textContent= g2&&g2.cars!=null? g2.cars : tr.cars;
       el.classList.toggle('mult', !!(g2&&g2.units.length>1));
     });
@@ -1150,7 +1322,7 @@ $('modalbg').onclick=e=>{ if(e.target===$('modalbg')) closeModal(); };
 function renderModal(t){
   const tr=data.dias[posDia].trains[selected]; if(!tr) return;
   const loc=locateEff(data.rosenName, tr, t);
-  const dest=tr.destIdx!=null? data.stations[tr.destIdx].name:'';
+  const di=effDestIdx(data.rosenName,tr,t), dest=di!=null? data.stations[di].name+(di!==tr.destIdx?'（折り返し運転）':''):'';
   const head=!loc?'運行時間外': loc.state==='stop'? `${data.stations[loc.idx].name}` : `${data.stations[loc.from].name}→${data.stations[loc.to].name}`;
   const last=tr.stops[tr.stops.length-1];
   const rows=tr.stops.map(s=>{
