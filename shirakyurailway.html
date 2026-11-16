@@ -1115,8 +1115,22 @@ function spaceDepartures(T, S){
 // 今の行先（折り返し運転中は折り返し駅）
 function effDestIdx(routeName, tr, t){ ensureEff(routeName); const E=tr._eff; if(!E||E.termAt==null) return tr.destIdx;
   const z=E.stops[E.termK]; return z&&t<=z.dep? E.termAt : tr.destIdx; }
+const TURN_SHOW = 15;
+// 同じ編成の、ひとつ前の列車（その列車の始発駅で終わる列車）
+function prevTrains(dia){
+  if(dia._prev) return dia._prev;
+  const m=new Map(), byUnit={};
+  for(const y of dia.opsTrains){ const g=y.segs[y.segs.length-1]; for(const u of g.units) (byUnit[u]=byUnit[u]||[]).push(y); }
+  for(const x of dia.opsTrains){ let best=null;
+    for(const u of (x.segs[0]||{units:[]}).units) for(const y of (byUnit[u]||[])){
+      if(y===x||y.lastStop.idx!==x.first.idx||y.lastStop.arr==null||y.lastStop.arr>x.first.dep) continue;
+      if(!best||y.lastStop.arr>best.lastStop.arr) best=y; }
+    if(best) m.set(x,best); }
+  return dia._prev=m;
+}
 // その場で止まっている間は、止まった時点の位置を返す
 function effLocate(tr, t){ const E=tr._eff, F=E.freeze;
+  if(E.showFrom!=null&&E.stops.length&&t>=E.showFrom&&t<E.stops[0].dep){ const z=E.stops[0]; return {state:'stop', idx:z.idx, stop:z, now:t, waiting:true}; }
   if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l){ l.now=t; l.at=F.from; } return l; }   // at: 止まった時点（駅間の位置はこの時刻で計算する）
   return locate(effView(tr), t); }
 /* ---- 輸送司令の変更（入線番線・行先・種別）---- */
@@ -1171,6 +1185,11 @@ function ensureEff(routeName){
     x._eff={stops:b0.map(z=>({...z})), base:b0, sched:withDwell(x.stops)}; }
   applyDispEdits(routeName, d, dia);
   applySuspensionsAll(routeName, d, dia);
+  // 折り返しの列車は、前の列車（同じ編成）が終点に着いて TURN_SHOW 秒後から始発駅に表示する
+  const prev=prevTrains(dia);
+  for(const x of dia.trains){ const E=x._eff; if(!E||!E.stops.length) continue; const y=prev.get(x); if(!y) continue;
+    const ya= y._eff&&y._eff.stops.length? y._eff.stops[y._eff.stops.length-1].arr : withDwell(y.stops).slice(-1)[0].arr;
+    const from=ya+TURN_SHOW; if(from<E.stops[0].dep) E.showFrom=from; }
   const {events, spots}=overtakesOf(d, dia);
   const hold=(S,i,t)=>{ const st=S._eff.stops, sh=t-st[i].dep; if(sh<=0) return; st[i].dep=t; for(let k=i+1;k<st.length;k++){ st[k].arr+=sh; st[k].dep+=sh; } };
   const actAt=(F,idx)=>timeAtStops(F._eff.stops, idx, F.down, d.segRun);
