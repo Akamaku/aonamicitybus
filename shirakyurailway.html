@@ -145,6 +145,7 @@
   .modal td.pass{color:var(--ink-dim)}
   .modal tr.now td{background:#fff5cc;font-weight:700}
   .modal tr.done td{color:#9aa}
+  .modal tr.cut td{color:#bbb;text-decoration:line-through}
   .modal .bikou{font-size:12px;color:var(--ink-dim);margin:10px 0 0}
 
 
@@ -1118,11 +1119,31 @@ function effDestIdx(routeName, tr, t){ ensureEff(routeName); const E=tr._eff; if
 function effLocate(tr, t){ const E=tr._eff, F=E.freeze;
   if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l) l.now=t; return l; }
   return locate(effView(tr), t); }
+/* ---- 輸送司令の変更（入線番線・行先・種別）---- */
+// DELAYS.edits = [{route, train, type?, dest?, tracks?:{駅名:番線名}}]（その日だけ有効）
+function dispEdits(routeName){ return DELAYS.date===opDateKey()? (DELAYS.edits||[]).filter(e=>e.route===routeName) : []; }
+function dispEdit(routeName, tr){ return dispEdits(routeName).find(e=>e.train===tr.trainNo)||null; }
+function effTypeName(routeName, tr){ const e=dispEdit(routeName,tr); return e&&e.type? e.type : tr.type.name; }
+function typeColorOf(routeName, name, tr){ if(tr&&name===tr.type.name) return chevColor(tr); const rc=TYPE_COLORS[routeName]; return (rc&&rc[name])||CHEV_COLOR[name]||'#555'; }
+function applyDispEdits(routeName, d, dia){
+  for(const ed of dispEdits(routeName)){
+    const x=dia.trains.find(t=>t.trainNo===ed.train&&t._eff); if(!x) continue; const E=x._eff;
+    if(ed.tracks) for(const nm in ed.tracks){ const si=d.stations.findIndex(z=>z.name===nm); if(si<0) continue;
+      const ti=d.stations[si].tracks.indexOf(ed.tracks[nm]); if(ti<0) continue;
+      E.stops.forEach((z,k)=>{ if(z.idx===si) E.stops[k]={...z, track:ti}; }); }
+    if(ed.dest){ const si=d.stations.findIndex(z=>z.name===ed.dest); const k=E.stops.findIndex(z=>z.idx===si);
+      if(k>0&&k<E.stops.length-1){ const z=E.stops[k]; E.stops=E.stops.slice(0,k+1); E.stops[k]={...z, kind:1, dep:z.arr+30}; E.termAt=si; E.termK=k; E.editDest=true; E.mod=true; } }
+  }
+}
+// 行先の表示（折り返し運転なら「（折返）」）
+function routeStationsData(routeName){ for(let i=0;i<ROUTES.length;i++){ const x=routeData(i); if(x.rosenName===routeName) return x.stations; } return []; }
+function effDestName(routeName, tr, t, long){ const di=effDestIdx(routeName,tr,t); if(di==null) return '';
+  const E=tr._eff, st=routeStationsData(routeName)[di]; return st.name+(di!==tr.destIdx&&!(E&&E.editDest)? (long?'（折り返し運転）':'（折返）') : ''); }
 // 実際に走る時刻（自動遅延＋admin の遅れ＋見合わせ＋退避での待ち）を列車ごとに作る。表示のたびに作り直す
 const EFF_CACHE={};
 function effView(tr){ const v=Object.create(tr); v.stops=tr._eff.stops; return v; }
 function ensureEff(routeName){
-  const key=opDateKey()+'|'+Math.floor(Date.now()/1000)+'|'+autoOn()+'|'+(DELAYS.updated||'')+'|'+(DELAYS.rules||[]).length;
+  const key=opDateKey()+'|'+Math.floor(Date.now()/1000)+'|'+autoOn()+'|'+(DELAYS.updated||'')+'|'+(DELAYS.rules||[]).length+'|'+(DELAYS.edits||[]).length;
   if(EFF_CACHE[routeName]===key) return;
   EFF_CACHE[routeName]=key;
   let d=null; for(let i=0;i<ROUTES.length;i++){ const x=routeData(i); if(x.rosenName===routeName){ d=x; break; } } if(!d) return;
@@ -1132,6 +1153,7 @@ function ensureEff(routeName){
     const D=baseDelaySec(routeName,x), base=withDwell(autoTrain(routeName,x).stops);
     const b0=base.map(z=>({...z, arr:z.arr+D, dep:z.dep+D}));
     x._eff={stops:b0.map(z=>({...z})), base:b0, sched:withDwell(x.stops)}; }
+  applyDispEdits(routeName, d, dia);
   applySuspensionsAll(routeName, d, dia);
   const {events, spots}=overtakesOf(d, dia);
   const hold=(S,i,t)=>{ const st=S._eff.stops, sh=t-st[i].dep; if(sh<=0) return; st[i].dep=t; for(let k=i+1;k<st.length;k++){ st[k].arr+=sh; st[k].dep+=sh; } };
@@ -1292,9 +1314,11 @@ function renderPos(t){
       const y=gr.base+(i-(n-1)/2)*step;
       const {k,tr,at}=it;
       let el=g.querySelector('#tr'+k);
+      const ty=effTypeName(data.rosenName,tr);
+      if(el&&el.dataset.ty!==ty){ el.remove(); el=null; }      // 輸送司令で種別が変わったら作り直す
       if(!el){
-        el=document.createElement('div'); el.className='tr '+(tr.down?'dn':'up'); el.id='tr'+k; el.dataset.k=k;
-        const mark=MARKS[tr.type.name]??tr.type.name.slice(0,1), c=chevColor(tr);
+        el=document.createElement('div'); el.className='tr '+(tr.down?'dn':'up'); el.id='tr'+k; el.dataset.k=k; el.dataset.ty=ty;
+        const mark=MARKS[ty]??ty.slice(0,1), c=typeColorOf(data.rosenName,ty,tr);
         const mk= mark?`<b style="background:${c}">${esc(mark)}</b>`:'', dst=esc(tr.destIdx!=null?data.stations[tr.destIdx].name:'');
         // 複々線表示では幅が足りないので、種別マークは2行目（行先の前）に置く
         el.innerHTML=`<svg class="chev" style="fill:${c}"><use href="#${tr.down?'chevDn':'chevUp'}"/></svg>
@@ -1305,7 +1329,7 @@ function renderPos(t){
       el.style.top=y+'px';
       if(tr.down){ el.style.left=`calc(${rx}% + ${off}px)`; el.style.right=''; } else { el.style.right=`calc(${100-rx}% + ${off}px)`; el.style.left=''; }
       { const t=delayShort(data.rosenName,tr); el.querySelector('.dl').textContent= t? ` ${t}` : '';
-        const di=effDestIdx(data.rosenName,tr,nowSec()); el.querySelector('.dn').textContent= di!=null? data.stations[di].name+(di!==tr.destIdx?'（折返）':'') : ''; }
+        el.querySelector('.dn').textContent=effDestName(data.rosenName,tr,nowSec()); }
       const g2=segAt(tr,at); el.querySelector('.cc').textContent= g2&&g2.cars!=null? g2.cars : tr.cars;
       el.classList.toggle('mult', !!(g2&&g2.units.length>1));
     });
@@ -1344,18 +1368,21 @@ $('modalbg').onclick=e=>{ if(e.target===$('modalbg')) closeModal(); };
 function renderModal(t){
   const tr=data.dias[posDia].trains[selected]; if(!tr) return;
   const loc=locateEff(data.rosenName, tr, t);
-  const di=effDestIdx(data.rosenName,tr,t), dest=di!=null? data.stations[di].name+(di!==tr.destIdx?'（折り返し運転）':''):'';
+  const dest=effDestName(data.rosenName,tr,t,true), E=tr._eff;
+  const effTrack=s=>{ const z=E&&E.stops.find(q=>q.idx===s.idx); return z? {...s, track:z.track} : s; };
+  const cutAt= E&&E.editDest? E.termAt : null, dirS=tr.down?1:-1;
   const head=!loc?'運行時間外': loc.state==='stop'? `${data.stations[loc.idx].name}` : `${data.stations[loc.from].name}→${data.stations[loc.to].name}`;
   const last=tr.stops[tr.stops.length-1];
   const rows=tr.stops.map(s=>{
     const st=data.stations[s.idx]; let cls='';
     if(loc){ if(loc.state==='stop'&&s.idx===loc.idx) cls='now'; else if(s.dep!=null&&s.dep<loc.now) cls='done'; }
-    if(s.kind===2) return `<tr class="${cls}"><td class="pass">${esc(st.name)}</td><td class="t pass">${s.arr!=null?fmtHM(s.arr):''}</td><td class="t pass">レ</td><td class="pass">${esc(trackName(s))}</td></tr>`;
-    return `<tr class="${cls}"><td>${esc(st.name)}</td><td class="t">${(s.arr!==s.dep||s===last)?fmtHM(s.arr):''}</td><td class="t">${s!==last?fmtHM(s.dep):''}</td><td>${esc(trackName(s))}</td></tr>`;
+    if(cutAt!=null&&(s.idx-cutAt)*dirS>0) cls+=' cut';           // 輸送司令で行先を変えた先は運休
+    if(s.kind===2) return `<tr class="${cls}"><td class="pass">${esc(st.name)}</td><td class="t pass">${s.arr!=null?fmtHM(s.arr):''}</td><td class="t pass">レ</td><td class="pass">${esc(trackName(effTrack(s)))}</td></tr>`;
+    return `<tr class="${cls}"><td>${esc(st.name)}</td><td class="t">${(s.arr!==s.dep||s===last)?fmtHM(s.arr):''}</td><td class="t">${s!==last?fmtHM(s.dep):''}</td><td>${esc(trackName(effTrack(s)))}</td></tr>`;
   }).join('');
   $('modal').innerHTML=`<div class="mh"><span>${esc(head)}</span><button id="mclose" aria-label="閉じる">×</button></div>
     <div class="mb">
-      <div class="l1"><span class="num">${esc(tr.trainNo)}</span> <span class="typ">[${esc(tr.type.name)}]</span> ${esc(dest)}</div>
+      <div class="l1"><span class="num">${esc(tr.trainNo)}</span> <span class="typ">[${esc(effTypeName(data.rosenName,tr))}]</span> ${esc(dest)}</div>
       <div class="l2">${carsLabel(tr)}両編成　<span style="color:#666;font-size:14px">運用 ${esc(tr.opNo)}</span>${delayHtml(data.rosenName,tr)}</div>
       ${consistHtml(tr, data.stations)}
       <table><thead><tr><th>駅</th><th style="text-align:right">着</th><th style="text-align:right">発</th><th>番線</th></tr></thead><tbody>${rows}</tbody></table>
