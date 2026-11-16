@@ -552,7 +552,7 @@ function delayParts(routeName, tr){
 }
 function delayOf(routeName, tr){ const p=delayParts(routeName,tr); return p? p.sec : 0; }
 function delayMin(routeName, tr){ return Math.floor(delayOf(routeName,tr)/60); }
-function delayShort(routeName, tr){ if(susNow(routeName,tr)) return '運休中'; const m=Math.floor(effDelayNow(routeName,tr)/60); return m>0? `${m}分遅れ` : ''; }
+function delayShort(routeName, tr){ if(susNow(routeName,tr)) return '運休中'; if(tr._eff&&tr._eff.holdNow) return '抑止中'; const m=Math.floor(effDelayNow(routeName,tr)/60); return m>0? `${m}分遅れ` : ''; }
 function delayHtml(routeName, tr){ const t=delayShort(routeName,tr); if(!t) return '';
   const sr=susNow(routeName,tr), p=delayParts(routeName,tr), ev= sr? eventText(sr) : p? eventText(p.r) : ''; return `<span class="dlabel">${t}</span>${ev?`<span class="dnote">${esc(ev)}</span>`:''}`; }
 /* ========== 自動遅延（シミュレーション） ========== */
@@ -870,7 +870,23 @@ function applyDispEdits(routeName, d, dia){
       E.stops.forEach((z,k)=>{ if(z.idx===si) E.stops[k]={...z, track:ti}; }); }
     if(ed.dest){ const si=d.stations.findIndex(z=>z.name===ed.dest); const k=E.stops.findIndex(z=>z.idx===si);
       if(k>0&&k<E.stops.length-1){ const z=E.stops[k]; E.stops=E.stops.slice(0,k+1); E.stops[k]={...z, kind:1, dep:z.arr+30}; E.termAt=si; E.termK=k; E.editDest=true; E.mod=true; } }
+    // 抑止: 駅にいればその駅で発車を止め、駅間ならその場で止める。解除すると止まっていた分だけ遅れて走る
+    for(const h of (ed.holds||[])) applyHold(x, h[0], h[1]);
   }
+}
+function applyHold(x, fromMs, toMs){
+  const E=x._eff, nowMs=Date.now(), now=nowSec(); if(!fromMs||fromMs>nowMs||!E.stops.length) return;
+  const active=!toMs||toMs>nowMs, ts=msToOpSec(fromMs), end= active? now : msToOpSec(toMs);
+  const st=E.stops, loc=effLocate(x,ts);
+  const shiftFrom=(k,to)=>{ if(to<=st[k].dep) return; const sh=to-st[k].dep; st[k]={...st[k], dep:to, kind:1}; for(let i=k+1;i<st.length;i++) st[i]={...st[i], arr:st[i].arr+sh, dep:st[i].dep+sh}; };
+  if(loc&&loc.state==='stop'){ const k=st.findIndex(z=>z.idx===loc.idx); if(k>=0) shiftFrom(k, active? now+60 : end); }
+  else if(loc){ const D=end-ts; if(D>0){ const pre=st.map(z=>({...z}));
+      for(let i=0;i<st.length;i++){ const z=st[i]; st[i]={...z, arr:z.arr>ts?z.arr+D:z.arr, dep:z.dep>ts?z.dep+D:z.dep}; }
+      if(!E.freeze) E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
+  else if(st[0].dep>ts) shiftFrom(0, active? now+60 : end);       // まだ始発駅を出ていない
+  else return;
+  if(active) E.holdNow=true;
+  E.mod=true;
 }
 // 行先の表示（折り返し運転なら「（折返）」）
 function routeStationsData(routeName){ for(let i=0;i<ROUTES.length;i++){ const x=routeData(i); if(x.rosenName===routeName) return x.stations; } return []; }
