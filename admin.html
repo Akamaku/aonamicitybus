@@ -680,7 +680,7 @@ function overtakesOf(d, dia){
 /* ---- 運転見合わせ（区間）---- */
 // 見合わせ開始の時点で区間の中にいた列車はその場で止まる。まだ区間に入っていない列車は、区間の手前の駅まで走って待つ。
 // 一部区間だけ再開したときは、再開した区間の列車は動き出し、見合わせが続く区間の手前の駅で待つ
-function msToOpSec(ms){ return nowSec()+(ms-Date.now())/1000; }
+function msToOpSec(ms){ const n=Date.now(), d=new Date(n); let s=d.getHours()*3600+d.getMinutes()*60+d.getSeconds()+d.getMilliseconds()/1000; if(s<DAY_START) s+=86400; return s+(ms-n)/1000; }   // 同じ時刻から計算してぶれないようにする
 function ruleMatchTrain(r,tr){ return !(r.dir&&r.dir!==(tr.down?'down':'up')) && !(r.type&&r.type!==tr.type.name) && !(r.train&&r.train!==tr.trainNo); }
 function secRange(r,S){ if(r.from&&r.to){ const a=S.findIndex(x=>x.name===r.from), b=S.findIndex(x=>x.name===r.to); if(a>=0&&b>=0) return [Math.min(a,b),Math.max(a,b)]; } return [0,S.length-1]; }
 // admin の「○分」だけの遅れ（見合わせで止まった時間は applySuspensions で扱う）
@@ -854,7 +854,7 @@ function effDestIdx(routeName, tr, t){ ensureEff(routeName); const E=tr._eff; if
   const z=E.stops[E.termK]; return z&&t<=z.dep? E.termAt : tr.destIdx; }
 // その場で止まっている間は、止まった時点の位置を返す
 function effLocate(tr, t){ const E=tr._eff, F=E.freeze;
-  if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l) l.now=t; return l; }
+  if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l){ l.now=t; l.at=F.from; } return l; }   // at: 止まった時点（駅間の位置はこの時刻で計算する）
   return locate(effView(tr), t); }
 /* ---- 輸送司令の変更（入線番線・行先・種別）---- */
 // DELAYS.edits = [{route, train, type?, dest?, tracks?:{駅名:番線名}}]（その日だけ有効）

@@ -53,6 +53,7 @@
   table.tk td,table.tk th{border-bottom:1px solid #e3e8f0;padding:5px 4px;text-align:left}
   table.tk select{padding:5px;font-size:14px;width:auto;min-width:5.5em}
   table.tk tr.chg td{background:#fff3f8}
+  table.tk .mi{color:#c00;font-weight:700}
   .actions{display:flex;gap:8px;flex-wrap:wrap}
   .elist .e{display:flex;justify-content:space-between;gap:8px;align-items:center;border-top:1px dashed #d8dee8;padding:8px 0;font-size:14px}
   .elist .e:first-child{border-top:0}
@@ -632,7 +633,7 @@ function overtakesOf(d, dia){
 /* ---- 運転見合わせ（区間）---- */
 // 見合わせ開始の時点で区間の中にいた列車はその場で止まる。まだ区間に入っていない列車は、区間の手前の駅まで走って待つ。
 // 一部区間だけ再開したときは、再開した区間の列車は動き出し、見合わせが続く区間の手前の駅で待つ
-function msToOpSec(ms){ return nowSec()+(ms-Date.now())/1000; }
+function msToOpSec(ms){ const n=Date.now(), d=new Date(n); let s=d.getHours()*3600+d.getMinutes()*60+d.getSeconds()+d.getMilliseconds()/1000; if(s<DAY_START) s+=86400; return s+(ms-n)/1000; }   // 同じ時刻から計算してぶれないようにする
 function ruleMatchTrain(r,tr){ return !(r.dir&&r.dir!==(tr.down?'down':'up')) && !(r.type&&r.type!==tr.type.name) && !(r.train&&r.train!==tr.trainNo); }
 function secRange(r,S){ if(r.from&&r.to){ const a=S.findIndex(x=>x.name===r.from), b=S.findIndex(x=>x.name===r.to); if(a>=0&&b>=0) return [Math.min(a,b),Math.max(a,b)]; } return [0,S.length-1]; }
 // admin の「○分」だけの遅れ（見合わせで止まった時間は applySuspensions で扱う）
@@ -806,7 +807,7 @@ function effDestIdx(routeName, tr, t){ ensureEff(routeName); const E=tr._eff; if
   const z=E.stops[E.termK]; return z&&t<=z.dep? E.termAt : tr.destIdx; }
 // その場で止まっている間は、止まった時点の位置を返す
 function effLocate(tr, t){ const E=tr._eff, F=E.freeze;
-  if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l) l.now=t; return l; }
+  if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l){ l.now=t; l.at=F.from; } return l; }   // at: 止まった時点（駅間の位置はこの時刻で計算する）
   return locate(effView(tr), t); }
 /* ---- 輸送司令の変更（入線番線・行先・種別）---- */
 // DELAYS.edits = [{route, train, type?, dest?, tracks?:{駅名:番線名}}]（その日だけ有効）
@@ -1014,7 +1015,7 @@ function drawTrains(b){
       let x,y;
       if(loc.state==='stop'){ const z=tr._eff&&tr._eff.stops.find(q=>q.idx===loc.idx); const ti=z&&z.track!=null? z.track : L.main[m][loc.idx];
         x=L.sx[loc.idx][ti]!=null? L.sx[loc.idx][ti] : L.cx[loc.idx]; y=L.sy[loc.idx][ti]!=null? L.sy[loc.idx][ti] : L.Ym[m]; }
-      else { const f=Math.max(0,Math.min(1,(t-loc.ta)/Math.max(1,loc.tb-loc.ta)));
+      else { const f=Math.max(0,Math.min(1,((loc.at??t)-loc.ta)/Math.max(1,loc.tb-loc.ta)));   // 抑止・見合わせで止まっているときは止まった時点の位置
         const trk=si=>{ const z=tr._eff&&tr._eff.stops.find(q=>q.idx===si); return z&&z.track!=null? z.track : L.main[m][si]; };
         const P=runPath(L, loc.from, trk(loc.from), loc.to, trk(loc.to), m, ln.down);
         [x,y]=alongPath(P, f); }
@@ -1105,9 +1106,13 @@ function renderPanel(){
       <option value="">${esc(S[tr.lastStop.idx].name)}（時刻表どおり）</option>
       ${destOpts.filter(z=>z.idx!==tr.lastStop.idx).map(z=>`<option value="${esc(S[z.idx].name)}"${ed.dest===S[z.idx].name?' selected':''}>${esc(S[z.idx].name)}${z.kind===2?'（通過駅・臨時停車）':''}</option>`).join('')}</select></div>
     <div style="font-size:14px;color:var(--ink-dim);font-weight:600">入線番線</div>
-    <table class="tk"><thead><tr><th>駅</th><th>時刻</th><th>番線</th></tr></thead><tbody>
+    <table class="tk"><thead><tr><th>駅</th><th>着</th><th>発</th><th>番線</th></tr></thead><tbody>
       ${ahead.map(z=>{ const nm=S[z.idx].name, sched=z.track!=null? S[z.idx].tracks[z.track] : '', cur=(ed.tracks&&ed.tracks[nm])||sched;
-        return `<tr class="${cur!==sched?'chg':''}"><td>${esc(nm)}${z.kind===2?' <small>通過</small>':''}</td><td>${fmtHM(z.kind===2? z.arr : (z===tr.lastStop? z.arr : z.dep))}</td>
+        const isFirst=z.idx===tr.first.idx, isLast=z===tr.lastStop, pass=z.kind===2, ez=eStop(z);
+        const late=(a,b)=> ez&&a!=null&&b!=null&&b-a>=60? `<br><small class="mi">見込 ${fmtHM(b)}</small>` : '';
+        const tArr= pass||isFirst? '' : fmtHM(z.arr)+late(z.arr, ez&&ez.arr);
+        const tDep= isLast? '' : pass? `<span style="color:#8a95a5">${fmtHM(z.dep??z.arr)} レ</span>`+late(z.dep??z.arr, ez&&ez.dep) : fmtHM(z.dep)+late(z.dep, ez&&ez.dep);
+        return `<tr class="${cur!==sched?'chg':''}"><td>${esc(nm)}${pass?' <small>通過</small>':''}</td><td>${tArr}</td><td>${tDep}</td>
           <td><select data-st="${esc(nm)}" data-sched="${esc(sched)}">${S[z.idx].tracks.map(n=>`<option${n===cur?' selected':''}>${esc(n)}</option>`).join('')}</select>${sched&&cur!==sched?` <small>（${esc(sched)}番から変更）</small>`:''}</td></tr>`; }).join('')}
     </tbody></table>
     <div class="actions" style="margin-bottom:12px">${holding? `<button class="btn" id="fHold" style="background:#18803a">抑止を解除して公開</button>` : `<button class="btn" id="fHold" style="background:#c00">この列車を抑止する</button>`}
@@ -1158,7 +1163,11 @@ async function saveEdit(route, no, e){
     DELAYS=j.data; for(const k in EFF_CACHE) delete EFF_CACHE[k];
     refreshTrains(); renderEdits(); if(selected) renderPanel();
     const m2= $('fMsg')? 'fMsg' : 'listMsg';
-    if(!Array.isArray(DELAYS.edits)) msg(m2,'公開しましたが、Apps Script が古いため変更が保存されていません（Code.gs を更新してください）','err');
+    // サーバーに保存された内容が送ったものと同じか確かめる（Apps Script が古いと抑止などが消える）
+    const got=(DELAYS.edits||[]).find(x=>x.route===route&&x.train===no);
+    const eq=(a,b)=>JSON.stringify(a||null)===JSON.stringify(b||null);
+    const lost= e? (!got||!eq(got.holds,e.holds)||!eq(got.type,e.type)||!eq(got.dest,e.dest)||!eq(got.tracks,e.tracks)) : !!got;
+    if(!Array.isArray(DELAYS.edits)||lost) msg(m2,'公開しましたが、Apps Script が古いため変更（抑止など）が保存されていません。最新の Code.gs を貼り直して「新バージョン」でデプロイしてください','err');
     else msg(m2, e? '変更して公開しました' : '変更をやめて公開しました','ok');
   }catch(err){ msg(mid,'通信できませんでした','err'); }
 }
