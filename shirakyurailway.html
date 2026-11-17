@@ -470,6 +470,11 @@ const REFRESH_MS = 15000;                        // 走行位置の更新間隔
 const DAY_START = 4*3600;                        // 1日の起点 4:00（0:00〜3:59は前日扱い＝24時〜27時）
 
 /* ========== 1. .oud2 パーサー ========== */
+// 時刻表にはない留置線（引上線・車庫）。運輸司令の入換・番線変更で使う
+const HIKI7=['引上1','引上2','引上3','引上4','引上5','引上6','引上7'];
+const EXTRA_TRACKS = {
+  '青波高速鉄道線': { '青波中央':HIKI7, '茶志内':HIKI7, '船渡川':['引上3-1','引上3-2','引上3-3','引上4-1','引上4-2','引上4-3','車庫'] },
+};
 function parseOud2(text, fallbackName){
   const lines = text.replace(/^\uFEFF/,'').split(/\r?\n/);
   function parseBlock(i){
@@ -491,6 +496,7 @@ function parseOud2(text, fallbackName){
     const tracks=tc? tc._children.filter(c=>c._type==='EkiTrack2').map(t=>t.TrackRyakusyou||t.TrackName||''):[];
     return {name:e.Ekimei||'', short:e.EkimeiJikokuRyaku||e.Ekimei||'', major:(e.Ekikibo||'').includes('Syuyou'), tracks};
   });
+  { const ex=EXTRA_TRACKS[fallbackName||rosen.Rosenmei]||{}; for(const st of stations) for(const n of (ex[st.name]||[])) if(!st.tracks.includes(n)) st.tracks.push(n); }
   const types=rosen._children.filter(c=>c._type==='Ressyasyubetsu').map(t=>({name:t.Syubetsumei||'', color:oudColor(t.DiagramSenColor)}));
   const dias=rosen._children.filter(c=>c._type==='Dia').map(d=>{
     const trains=[];
@@ -1120,9 +1126,9 @@ const TURN_SHOW = 15;
 function prevTrains(dia){
   if(dia._prev) return dia._prev;
   const m=new Map(), byUnit={};
-  for(const y of dia.opsTrains){ const g=y.segs[y.segs.length-1]; for(const u of g.units) (byUnit[u]=byUnit[u]||[]).push(y); }
+  for(const y of dia.opsTrains){ if(!y.segs||!y.segs.length) continue; const g=y.segs[y.segs.length-1]; for(const u of g.units) (byUnit[u]=byUnit[u]||[]).push(y); }
   for(const x of dia.opsTrains){ let best=null;
-    for(const u of (x.segs[0]||{units:[]}).units) for(const y of (byUnit[u]||[])){
+    for(const u of ((x.segs&&x.segs[0])||{units:[]}).units) for(const y of (byUnit[u]||[])){
       if(y===x||y.lastStop.idx!==x.first.idx||y.lastStop.arr==null||y.lastStop.arr>x.first.dep) continue;
       if(!best||y.lastStop.arr>best.lastStop.arr) best=y; }
     if(best) m.set(x,best); }
@@ -1142,6 +1148,7 @@ function typeColorOf(routeName, name, tr){ if(tr&&name===tr.type.name) return ch
 function applyDispEdits(routeName, d, dia){
   for(const ed of dispEdits(routeName)){
     const x=dia.trains.find(t=>t.trainNo===ed.train&&t._eff); if(!x) continue; const E=x._eff;
+    if(ed.stops||ed.times){ applyStopTimeEdits(x, ed, d); E.edited=true; E.mod=true; }
     if(ed.tracks) for(const nm in ed.tracks){ const si=d.stations.findIndex(z=>z.name===nm); if(si<0) continue;
       const ti=d.stations[si].tracks.indexOf(ed.tracks[nm]); if(ti<0) continue;
       E.stops.forEach((z,k)=>{ if(z.idx===si) E.stops[k]={...z, track:ti}; }); }
@@ -1150,6 +1157,42 @@ function applyDispEdits(routeName, d, dia){
     // 抑止: 駅にいればその駅で発車を止め、駅間ならその場で止める。解除すると止まっていた分だけ遅れて走る
     for(const h of (ed.holds||[])) applyHold(x, h[0], h[1]);
   }
+}
+// 停車駅の変更（stops: {駅名: 1=停車 / 2=通過}）と時刻の変更（times: {駅名: [着, 発]} 秒。null は変えない）
+// 実際に走る時刻（E.stops）と、遅れの基準になる時刻表（E.sched）の両方に同じ変更をかける
+function applyStopTimeEdits(x, ed, d){
+  const E=x._eff, S=d.stations, idxOf=nm=>S.findIndex(z=>z.name===nm);
+  const kinds=arr=>{
+    for(const nm in (ed.stops||{})){ const si=idxOf(nm), want=+ed.stops[nm]; if(si<0) continue;
+      let k=arr.findIndex(z=>z.idx===si);
+      if(want===1){
+        if(k<0){ const te=timeAtStops(arr,si,x.down,d.segRun); if(!te) continue; const dir=x.down?1:-1;
+          k=arr.findIndex(z=>(z.idx-si)*dir>0); if(k<=0) continue;
+          const o=x.stops.find(z=>z.idx===si)||{};
+          arr.splice(k,0,{idx:si, kind:1, arr:te.arr, dep:te.arr+STD_DWELL, track:o.track??null});
+          for(let i=k+1;i<arr.length;i++) arr[i]={...arr[i], arr:arr[i].arr+STD_DWELL, dep:arr[i].dep+STD_DWELL}; }
+        else if(arr[k].kind===2){ arr[k]={...arr[k], kind:1, dep:arr[k].arr+STD_DWELL};
+          for(let i=k+1;i<arr.length;i++) arr[i]={...arr[i], arr:arr[i].arr+STD_DWELL, dep:arr[i].dep+STD_DWELL}; } }
+      else if(want===2&&k>0&&k<arr.length-1&&arr[k].kind===1) arr[k]={...arr[k], kind:2, arr:arr[k].dep};   // 通過（発車時刻に通過）
+    } };
+  kinds(E.sched); kinds(E.stops);
+  if(ed.times){
+    const orig={}; for(const z of E.sched) orig[z.idx]={arr:z.arr, dep:z.dep};
+    const shift=arr=>{ let c=0;
+      for(let k=0;k<arr.length;k++){ const z=arr[k], o=orig[z.idx], t=o&&ed.times[S[z.idx].name];
+        const aS= t&&t[0]!=null? t[0]-o.arr : c, dS= t&&t[1]!=null? t[1]-o.dep : (t&&t[0]!=null&&z.kind===2? aS : c);
+        let a=z.arr+aS, dp=z.dep+dS; if(k>0) a=Math.max(a, arr[k-1].dep+1); dp=Math.max(dp, a);
+        arr[k]={...z, arr:a, dep:dp}; c=dS; } };
+    shift(E.sched); shift(E.stops);
+  }
+}
+// 運輸司令の変更をかけたあとの、表示用の時刻表の1行
+function schedRow(tr, s){
+  const E=tr._eff, last=tr.stops[tr.stops.length-1];
+  if(!(E&&E.edited)) return {kind:s.kind, arr:s.arr, dep:s.dep, showArr:s.kind===1&&(s.arr!==s.dep||s===last)&&s!==tr.first};
+  const z=E.sched.find(q=>q.idx===s.idx); if(!z) return {kind:s.kind, arr:s.arr, dep:s.dep, showArr:false};
+  const ovr=false;
+  return {kind:z.kind, arr:z.arr, dep:z.dep, showArr:z.kind===1&&s!==tr.first&&(s===last||(s.kind===1&&s.arr!==s.dep)||z.dep-z.arr!==STD_DWELL)};
 }
 function applyHold(x, fromMs, toMs){
   const E=x._eff, nowMs=Date.now(), now=nowSec(); if(!fromMs||fromMs>nowMs||!E.stops.length) return;
@@ -1186,10 +1229,13 @@ function ensureEff(routeName){
   applyDispEdits(routeName, d, dia);
   applySuspensionsAll(routeName, d, dia);
   // 折り返しの列車は、前の列車（同じ編成）が終点に着いて TURN_SHOW 秒後から始発駅に表示する
+  // 出庫する列車は出庫の時刻から表示し、入庫した編成は（次に出庫するまで）表示しない
   const prev=prevTrains(dia);
-  for(const x of dia.trains){ const E=x._eff; if(!E||!E.stops.length) continue; const y=prev.get(x); if(!y) continue;
+  for(const x of dia.trains){ const E=x._eff; if(!E||!E.stops.length) continue; const dep0=E.stops[0].dep, sh=dep0-x.first.dep;
+    if(x.opB&&x.opB.type===3){ if(x.opB.time!=null&&x.opB.time+sh<dep0) E.showFrom=x.opB.time+sh; continue; }
+    const y=prev.get(x); if(!y||(y.opA&&y.opA.type===3)) continue;
     const ya= y._eff&&y._eff.stops.length? y._eff.stops[y._eff.stops.length-1].arr : withDwell(y.stops).slice(-1)[0].arr;
-    const from=ya+TURN_SHOW; if(from<E.stops[0].dep) E.showFrom=from; }
+    const from=ya+TURN_SHOW; if(from<dep0) E.showFrom=from; }
   const {events, spots}=overtakesOf(d, dia);
   const hold=(S,i,t)=>{ const st=S._eff.stops, sh=t-st[i].dep; if(sh<=0) return; st[i].dep=t; for(let k=i+1;k<st.length;k++){ st[k].arr+=sh; st[k].dep+=sh; } };
   const actAt=(F,idx)=>timeAtStops(F._eff.stops, idx, F.down, d.segRun);
@@ -1412,8 +1458,9 @@ function renderModal(t){
     const st=data.stations[s.idx]; let cls='';
     if(loc){ if(loc.state==='stop'&&s.idx===loc.idx) cls='now'; else if(s.dep!=null&&s.dep<loc.now) cls='done'; }
     if(cutAt!=null&&(s.idx-cutAt)*dirS>0) cls+=' cut';           // 輸送司令で行先を変えた先は運休
-    if(s.kind===2) return `<tr class="${cls}"><td class="pass">${esc(st.name)}</td><td class="t pass">${s.arr!=null?fmtHM(s.arr):''}</td><td class="t pass">レ</td><td class="pass">${esc(trackName(effTrack(s)))}</td></tr>`;
-    return `<tr class="${cls}"><td>${esc(st.name)}</td><td class="t">${(s.arr!==s.dep||s===last)?fmtHM(s.arr):''}</td><td class="t">${s!==last?fmtHM(s.dep):''}</td><td>${esc(trackName(effTrack(s)))}</td></tr>`;
+    const r=schedRow(tr,s);                                       // 運輸司令で停車駅・時刻を変えていればその内容
+    if(r.kind===2) return `<tr class="${cls}"><td class="pass">${esc(st.name)}</td><td class="t pass">${r.arr!=null?fmtHM(r.arr):''}</td><td class="t pass">レ</td><td class="pass">${esc(trackName(effTrack(s)))}</td></tr>`;
+    return `<tr class="${cls}"><td>${esc(st.name)}</td><td class="t">${(r.showArr||s===last)?fmtHM(r.arr):''}</td><td class="t">${s!==last?fmtHM(r.dep):''}</td><td>${esc(trackName(effTrack(s)))}</td></tr>`;
   }).join('');
   $('modal').innerHTML=`<div class="mh"><span>${esc(head)}</span><button id="mclose" aria-label="閉じる">×</button></div>
     <div class="mb">
