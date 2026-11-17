@@ -1035,7 +1035,7 @@ function applySuspensionsAll(routeName, d, dia){
       if(x===cause && loc){                                                              // 当該列車: その場で止まる
         const end= active? now : until, F=E.freeze;
         if(F&&F.from===ts){ const ext=end-(F.end||ts); if(ext>0){ for(const z of st){ if(z.arr>ts) z.arr+=ext; if(z.dep>ts) z.dep+=ext; } F.end=end; F.to= active? Infinity : end; } }
-        else if(!F){ const D=end-ts; if(D>0){ const pre=st.map(z=>({...z})); for(const z of st){ if(z.arr>ts) z.arr+=D; if(z.dep>ts) z.dep+=D; } E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
+        else if(!F){ const D=end-ts; if(D>0){ const pre=st.map(z=>({...z})); shiftRun(st, ts, D); E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
         if(active){ E.susRule=r; E.susFrom=ts; } E.mod=true; addDemand(x,dir); continue;
       }
       if(loc && pos>pIn){                                                                // 区間（と手前）の中: 次の停車駅まで走って待つ
@@ -1046,7 +1046,7 @@ function applySuspensionsAll(routeName, d, dia){
         if(loc.state!=='stop'&&st[k].idx*dir>=pEnd(dir)) continue;                        // 次の停車駅が区間の外 → そのまま抜けていく
         const blocked= cause&&cause!==x&&cause.down===x.down&&causeP!=null&&causeP*dir>pos&&causeP*dir<=st[k].idx*dir;
         if(blocked&&loc.state!=='stop'){                                                 // 当該列車に阻まれて駅まで行けない → その場で止まる
-          if(!E.freeze){ const end= active? now : until, D=end-ts; if(D>0){ const pre=st.map(z=>({...z})); for(const z of st){ if(z.arr>ts) z.arr+=D; if(z.dep>ts) z.dep+=D; } E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
+          if(!E.freeze){ const end= active? now : until, D=end-ts; if(D>0){ const pre=st.map(z=>({...z})); shiftRun(st, ts, D); E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
           if(active){ E.susRule=r; E.susFrom=ts; }
         } else {
           hold(x,k,holdEnd); if(active){ E.susRule=r; E.susFrom=E.stops[k].arr; }
@@ -1137,6 +1137,7 @@ function prevTrains(dia){
 // その場で止まっている間は、止まった時点の位置を返す
 function effLocate(tr, t){ const E=tr._eff, F=E.freeze;
   if(E.showFrom!=null&&E.stops.length&&t>=E.showFrom&&t<E.stops[0].dep){ const z=E.stops[0]; return {state:'stop', idx:z.idx, stop:z, now:t, waiting:true}; }
+  for(const H of (E.hfreeze||[])) if(t>=H.from&&t<H.to){ const v=Object.create(tr); v.stops=H.pre; const l=locate(v,H.from); if(l){ l.now=t; l.at=H.from; } return l; }   // 抑止でその場に止まっている
   if(F&&t>=F.from&&t<F.to){ const v=Object.create(tr); v.stops=F.pre; const l=locate(v,F.from); if(l){ l.now=t; l.at=F.from; } return l; }   // at: 止まった時点（駅間の位置はこの時刻で計算する）
   return locate(effView(tr), t); }
 /* ---- 輸送司令の変更（入線番線・行先・種別）---- */
@@ -1152,6 +1153,8 @@ function applyDispEdits(routeName, d, dia){
     if(ed.tracks) for(const nm in ed.tracks){ const si=d.stations.findIndex(z=>z.name===nm); if(si<0) continue;
       const ti=d.stations[si].tracks.indexOf(ed.tracks[nm]); if(ti<0) continue;
       E.stops.forEach((z,k)=>{ if(z.idx===si) E.stops[k]={...z, track:ti}; }); }
+    if(ed.cancel){ E.stops=[]; E.cancel=true; E.mod=true; continue; }                 // 運休
+    if(ed.from){ const si=d.stations.findIndex(z=>z.name===ed.from); startFrom(x, si, d); }   // 途中駅から運転
     if(ed.dest){ const si=d.stations.findIndex(z=>z.name===ed.dest); const k=E.stops.findIndex(z=>z.idx===si);
       if(k>0&&k<E.stops.length-1){ const z=E.stops[k]; E.stops=E.stops.slice(0,k+1); E.stops[k]={...z, kind:1, dep:z.arr+30}; E.termAt=si; E.termK=k; E.editDest=true; E.mod=true; } }
     // 抑止: 駅にいればその駅で発車を止め、駅間ならその場で止める。解除すると止まっていた分だけ遅れて走る
@@ -1194,15 +1197,86 @@ function schedRow(tr, s){
   const ovr=false;
   return {kind:z.kind, arr:z.arr, dep:z.dep, showArr:z.kind===1&&s!==tr.first&&(s===last||(s.kind===1&&s.arr!==s.dep)||z.dep-z.arr!==STD_DWELL)};
 }
+// 駅間で止まった列車の時刻を D 秒ずらす。直前に出た駅の発時刻も一緒にずらすので、動き出すときに位置が飛ばない
+function shiftRun(st, ts, D){
+  let last=-1; for(let i=0;i<st.length;i++) if(st[i].dep<=ts) last=i;
+  const between= last>=0&&last<st.length-1&&st[last+1].arr>ts;
+  for(let i=0;i<st.length;i++){ const z=st[i]; let a=z.arr>ts? z.arr+D : z.arr, dp=z.dep>ts? z.dep+D : z.dep;
+    if(between&&i===last){ dp=z.dep+D; if(z.kind===2) a=z.arr+D; }
+    st[i]={...z, arr:a, dep:dp}; }
+}
+// 途中の駅 si から運転する（それより手前は運休）
+function startFrom(x, si, d, track){
+  const E=x._eff, dir=x.down?1:-1; if(si<0||!E.stops.length) return false;
+  const cut=arr=>{ let k=arr.findIndex(z=>z.idx===si);
+    if(k<0){ const te=timeAtStops(arr,si,x.down,d.segRun); if(!te) return null; k=arr.findIndex(z=>(z.idx-si)*dir>0); if(k<=0) return null;
+      const o=x.stops.find(z=>z.idx===si)||{}; arr.splice(k,0,{idx:si, kind:1, arr:te.dep, dep:te.dep, track:o.track??null}); }
+    if(k<=0||k>=arr.length-1) return null;
+    const out=arr.slice(k); out[0]={...out[0], kind:1, arr:out[0].dep-STD_DWELL}; if(track!=null) out[0].track=track; return out; };
+  const a=cut(E.stops); if(!a) return false; E.stops=a; const b=cut(E.sched); if(b) E.sched=b;
+  E.startAt=si; E.mod=true; return true;
+}
+/* ---- 自動の運転整理: 段落とし・山切り・折り返しの遅れ ----
+   折り返す列車は、前の列車（同じ編成）が着いて折り返せるまで発車できない。間に合わないときは
+   ・段落とし: その駅にもう着いている別の編成（あとの列車に使う予定だった編成）で定刻に発車する。遅れた編成はあとの列車に回る
+   ・山切り:   それもできず 5 分以上遅れるときは、遅れている列車を手前の折り返し駅で打ち切り、折り返しの列車をその駅から定刻で出す
+   ・どちらもできなければ、折り返しの列車を遅らせる */
+const YAMA_MIN = 300;
+const YAMA_EVERY = 2;       // 山切りしたら、同じ終点では次の2本は山切りしない
+function autoRecover(routeName, d, dia){
+  const prev=prevTrains(dia), S=d.stations, tbs=TURNBACK[routeName]||null;
+  const next=new Map(); for(const [x,y] of prev) if(dia.trains.includes(x)&&!(y.opA&&y.opA.type===3)&&!(x.opB&&x.opB.type===3)) next.set(y,x);
+  if(!next.size) return;
+  const cls=t=>String(carsLabel(t)).split('→').pop();
+  const effArr=y=>{ const E=y._eff; if(!E) return y.lastStop.arr; if(!E.stops.length) return Infinity; const z=E.stops[E.stops.length-1]; return z.idx===y.lastStop.idx? z.arr : Infinity; };
+  const avail=y=>effArr(y)+Math.min(TURN_TIME, Math.max(0, next.get(y).first.dep-y.lastStop.arr));
+  const pool={}; for(const [y,x] of next){ const k=x.first.idx+'|'+cls(x); (pool[k]=pool[k]||[]).push(y); }
+  const xs=[...next.values()].filter(x=>x._eff).sort((a,b)=>a.first.dep-b.first.dep);
+  const sinceYama={};      // 終点ごとに、続けて山切りしない（終点まで行く列車を残す）
+  const used=new Set(), schedAt=(t,i)=>timeAtStops(withDwell(t.stops), i, t.down, d.segRun);
+  for(const x of xs){
+    const E=x._eff, own=prev.get(x);
+    if(!E.stops.length) continue;                                                          // 運休: 編成は始発駅に残り、あとの列車に使える
+    if(E.startAt!=null||E.stops[0].idx!==x.first.idx||E.stops.some(z=>z.brk)){ used.add(own); continue; }
+    const dep0=E.stops[0].dep, cand=(pool[x.first.idx+'|'+cls(x)]||[]).filter(y=>!used.has(y));
+    if(!used.has(own)&&avail(own)<=dep0){ used.add(own); continue; }                       // 時刻表どおりの編成で発車
+    const byNext=(a,b)=>next.get(a).first.dep-next.get(b).first.dep;
+    const ready=cand.filter(y=>y!==own&&avail(y)<=dep0).sort(byNext)[0];
+    if(ready){ used.add(ready); E.feed=ready; E.dan=ready; continue; }                     // 段落とし
+    const rest=cand.filter(y=>isFinite(avail(y))).sort((a,b)=>avail(a)-avail(b))[0];
+    if(!rest) continue;                                                                    // 来る編成がない（運休など）
+    const late=avail(rest)-dep0; used.add(rest); if(rest!==own){ E.feed=rest; E.dan=rest; }
+    const sk=x.first.idx; sinceYama[sk]=(sinceYama[sk]??9)+1;
+    if(late>=YAMA_MIN&&sinceYama[sk]>YAMA_EVERY&&tbs&&rest._eff&&rest._eff.termAt==null&&!rest._eff.freeze&&!rest._eff.stops.some(z=>z.brk)){      // 山切り
+      const P=rest, dirP=P.down?1:-1; let done=false;
+      const ks=S.map((st,i)=>i).filter(i=>tbs[S[i].name]&&(i-P.first.idx)*dirP>0&&(P.lastStop.idx-i)*dirP>0).sort((a,b)=>Math.abs(a-x.first.idx)-Math.abs(b-x.first.idx));
+      for(const K of ks){
+        const tx=timeAtStops(E.stops,K,x.down,d.segRun), tp=timeAtStops(P._eff.stops,K,P.down,d.segRun), sp=schedAt(P,K);
+        if(!tx||!tp||!sp||tp.arr+TURN_TIME>tx.dep) continue;
+        if(tp.arr-sp.arr<late-120) continue;                                               // この駅を過ぎてから遅れた列車は打ち切れない
+        const st=P._eff.stops; let k=st.findIndex(z=>z.idx===K);
+        if(k<0){ k=st.findIndex(z=>(z.idx-K)*dirP>0); if(k<=0) continue; st.splice(k,0,{idx:K, kind:1, arr:tp.arr, dep:tp.arr, track:(P.stops.find(z=>z.idx===K)||{}).track??null}); }
+        const trk=turnTrack(routeName,S,K,st[k].track);
+        if(!startFrom(x, K, d, trk)) continue;
+        P._eff.stops=st.slice(0,k+1); P._eff.stops[k]={...st[k], kind:1, dep:st[k].arr+STD_DWELL, track:trk};
+        P._eff.termAt=K; P._eff.termK=k; P._eff.yama=x; P._eff.mod=true; E.yama=P; E.feed=P; done=true; sinceYama[sk]=0; break;
+      }
+      if(done) continue;
+    }
+    E.stops=E.stops.map(z=>({...z, arr:z.arr+late, dep:z.dep+late})); E.turnLate=late; E.mod=true;       // 折り返しの遅れ
+  }
+}
 function applyHold(x, fromMs, toMs){
-  const E=x._eff, nowMs=Date.now(), now=nowSec(); if(!fromMs||fromMs>nowMs||!E.stops.length) return;
-  const active=!toMs||toMs>nowMs, ts=msToOpSec(fromMs), end= active? now : msToOpSec(toMs);
+  // 端末の時計が少しずれていても止まるように、2分先までの抑止は「今から」として扱う
+  const E=x._eff, nowMs=Date.now(), now=nowSec(); if(!fromMs||fromMs>nowMs+120000||!E.stops.length) return;
+  const active=!toMs||toMs>nowMs, ts=Math.min(msToOpSec(fromMs), now), end= active? now : Math.max(ts, msToOpSec(toMs));
   const st=E.stops, loc=effLocate(x,ts);
   const shiftFrom=(k,to)=>{ if(to<=st[k].dep) return; const sh=to-st[k].dep; st[k]={...st[k], dep:to, kind:1}; for(let i=k+1;i<st.length;i++) st[i]={...st[i], arr:st[i].arr+sh, dep:st[i].dep+sh}; };
   if(loc&&loc.state==='stop'){ const k=st.findIndex(z=>z.idx===loc.idx); if(k>=0) shiftFrom(k, active? now+60 : end); }
   else if(loc){ const D=end-ts; if(D>0){ const pre=st.map(z=>({...z}));
-      for(let i=0;i<st.length;i++){ const z=st[i]; st[i]={...z, arr:z.arr>ts?z.arr+D:z.arr, dep:z.dep>ts?z.dep+D:z.dep}; }
-      if(!E.freeze) E.freeze={from:ts, to: active? Infinity : end, end, pre}; } }
+      shiftRun(st, ts, D);
+      (E.hfreeze=E.hfreeze||[]).push({from:ts, to: active? Infinity : end, pre}); }      // 何回目の抑止でもその場で止める
+    else if(active) (E.hfreeze=E.hfreeze||[]).push({from:ts, to:Infinity, pre:st.map(z=>({...z}))}); }
   else if(st[0].dep>ts) shiftFrom(0, active? now+60 : end);       // まだ始発駅を出ていない
   else return;
   if(active) E.holdNow=true;
@@ -1228,13 +1302,14 @@ function ensureEff(routeName){
     x._eff={stops:b0.map(z=>({...z})), base:b0, sched:withDwell(x.stops)}; }
   applyDispEdits(routeName, d, dia);
   applySuspensionsAll(routeName, d, dia);
+  autoRecover(routeName, d, dia);
   // 折り返しの列車は、前の列車（同じ編成）が終点に着いて TURN_SHOW 秒後から始発駅に表示する
   // 出庫する列車は出庫の時刻から表示し、入庫した編成は（次に出庫するまで）表示しない
   const prev=prevTrains(dia);
   for(const x of dia.trains){ const E=x._eff; if(!E||!E.stops.length) continue; const dep0=E.stops[0].dep, sh=dep0-x.first.dep;
     if(x.opB&&x.opB.type===3){ if(x.opB.time!=null&&x.opB.time+sh<dep0) E.showFrom=x.opB.time+sh; continue; }
-    const y=prev.get(x); if(!y||(y.opA&&y.opA.type===3)) continue;
-    const ya= y._eff&&y._eff.stops.length? y._eff.stops[y._eff.stops.length-1].arr : withDwell(y.stops).slice(-1)[0].arr;
+    const y=E.feed||prev.get(x); if(!y||(y.opA&&y.opA.type===3)||(y._eff&&!y._eff.stops.length)) continue;
+    const ya= y._eff? y._eff.stops[y._eff.stops.length-1].arr : withDwell(y.stops).slice(-1)[0].arr;
     const from=ya+TURN_SHOW; if(from<dep0) E.showFrom=from; }
   const {events, spots}=overtakesOf(d, dia);
   const hold=(S,i,t)=>{ const st=S._eff.stops, sh=t-st[i].dep; if(sh<=0) return; st[i].dep=t; for(let k=i+1;k<st.length;k++){ st[k].arr+=sh; st[k].dep+=sh; } };
@@ -1253,6 +1328,50 @@ function ensureEff(routeName){
       const k=cand[c], nk= c+1<cand.length? cand[c+1] : st.length-1;
       const fk=actAt(F,st[k].idx), fn=actAt(F,st[nk].idx); if(!fk||!fn) break;   // 追い越す側がこの先を走らない
       if(fn.arr<st[nk].arr){ hold(S,k,fk.dep+PASS_MIN_GAP); break; }               // 次の退避駅までに追いつかれる → ここで待つ
+    }
+  }
+  noPassOnTrack(d, dia);
+}
+// 同じ線路の上では追い越さない:
+//  ・駅間では、先に駅を出た列車より先に次の駅へ着かない（後ろの列車を遅らせる）
+//  ・駅では、前の列車と同じ番線に入るなら、前の列車が出るまで入らない（番線が違えば追い越せる）
+// 時刻表そのものが同じ形になっている組み合わせ（時刻のない通過駅の按分によるもの）は対象外
+const NO_PASS_GAP = 30;
+function noPassOnTrack(d, dia){
+  const S=d.stations, n=S.length, now=nowSec();
+  const act=dia.trains.filter(x=>{ const E=x._eff; if(!E||E.stops.length<2||E.stops.some(z=>z.brk)) return false;
+    return E.stops[0].dep<now+3*3600 && E.stops[E.stops.length-1].arr>now-3600; });
+  if(!act.some(x=>x._eff.mod||x._eff.stops[0].dep!==x._eff.sched[0].dep||x._eff.stops[x._eff.stops.length-1].arr!==x._eff.sched[x._eff.sched.length-1].arr)) return;   // 乱れがなければ何もしない
+  const schedAt=(x,i)=>{ x._tAt=x._tAt||{}; if(!(i in x._tAt)) x._tAt[i]=timeAtStops(withDwell(x.stops), i, x.down, d.segRun); return x._tAt[i]; };
+  const effAt=(x,i)=>timeAtStops(x._eff.stops, i, x.down, d.segRun);
+  const trackAt=(x,i)=>{ const z=x._eff.stops.find(q=>q.idx===i); if(z&&z.track!=null) return z.track; const q=x.stops.find(q=>q.idx===i); return q&&q.track!=null? q.track : null; };
+  const delayFrom=(x,i,sh)=>{ const st=x._eff.stops, dir=x.down?1:-1; let k=st.findIndex(z=>(z.idx-i)*dir>=0); if(k<0) return;
+    for(;k<st.length;k++) st[k]={...st[k], arr:st[k].arr+sh, dep:st[k].dep+sh}; x._eff.mod=true; };
+  for(const dir of [1,-1]){
+    const T=act.filter(x=>(x.down?1:-1)===dir);
+    for(let step=0; step<n-1; step++){
+      const a= dir>0? step : n-1-step, b=a+dir;
+      const L=[]; for(const x of T){ const ea=effAt(x,a), eb=effAt(x,b); if(ea&&eb) L.push({x, in:ea.dep, out:eb.arr}); }
+      L.sort((p,q)=>p.in-q.in);
+      for(let k=1;k<L.length;k++){ const f=L[k];
+        // 直前の数本と比べる（先に出た列車より先に着かない）
+        for(let j=k-1;j>=0&&j>=k-4;j--){ const ld=L[j];
+          const need=ld.out+NO_PASS_GAP; if(f.out>=need) continue;
+          const sa=schedAt(f.x,a), sb=schedAt(f.x,b), la=schedAt(ld.x,a), lb=schedAt(ld.x,b);
+          const base= sa&&sb&&la&&lb&&la.dep<=sa.dep? Math.max(0, lb.arr+NO_PASS_GAP-sb.arr) : 0;   // 時刻表の時点である分は除く
+          const sh=need-f.out-base; if(sh<=0) continue;
+          delayFrom(f.x, b, sh); f.out+=sh; }
+      }
+      // 駅 b の同じ番線: 前の列車が出てから入る
+      const A=[]; for(const x of T){ const eb=effAt(x,b); if(eb) A.push({x, arr:eb.arr, dep:eb.dep, trk:trackAt(x,b)}); }
+      A.sort((p,q)=>p.arr-q.arr);
+      for(let k=1;k<A.length;k++){ const f=A[k]; if(f.trk==null) continue;
+        for(let j=k-1;j>=0&&j>=k-4;j--){ const ld=A[j]; if(ld.trk!==f.trk) continue;
+          const need=ld.dep+NO_PASS_GAP; if(f.arr>=need) continue;
+          const sf=schedAt(f.x,b), sl=schedAt(ld.x,b), base= sf&&sl&&sl.arr<=sf.arr? Math.max(0, sl.dep+NO_PASS_GAP-sf.arr) : 0;
+          const sh=need-f.arr-base; if(sh<=0) continue;
+          delayFrom(f.x, b, sh); f.arr+=sh; f.dep+=sh; }
+      }
     }
   }
 }
@@ -1869,7 +1988,7 @@ function setRoute(i){
 }
 setRoute(0); go('home');
 loadDelays().then(()=>{ if(document.getElementById('pg-pos').classList.contains('show')) refresh(); });
-setInterval(()=>loadDelays().then(()=>{ if(document.getElementById('pg-pos').classList.contains('show')) refresh(); }), 60000);
+setInterval(()=>loadDelays().then(()=>{ if(document.getElementById('pg-pos').classList.contains('show')) refresh(); }), 15000);   // 抑止などをすぐ反映するため15秒ごとに読み直す
 </script>
 </body>
 </html>
