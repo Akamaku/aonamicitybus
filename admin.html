@@ -254,11 +254,12 @@ function parseOud2(text, fallbackName){
     }
     { const nr=TRAIN_NO_RULES[fallbackName||rosen.Rosenmei]; if(nr) nr(trains); }
     const rname0=fallbackName||rosen.Rosenmei, showT=OPS_SHOW_TYPES[rname0]||[];
-    const diaObj={name:d.DiaName||'ダイヤ', trains: trains.filter(x=>!x.hidden), holiday:/土休|休日|土日/.test(d.DiaName||'')};
+    const kaiso=x=>!!(typeof window!=='undefined'&&window.SHOW_KAISO)&&x.type.name==='回送';      // 運輸司令では回送も扱う
+    const diaObj={name:d.DiaName||'ダイヤ', trains: trains.filter(x=>!x.hidden||kaiso(x)), holiday:/土休|休日|土日/.test(d.DiaName||'')};
     { const tc=TYPE_COLORS[fallbackName||rosen.Rosenmei]; if(tc) for(const x of trains){ if(tc[x.type.name]) x.color=tc[x.type.name]; } }
-    diaObj.opsTrains=trains.filter(x=>!x.hidden||showT.includes(x.type.name));
+    diaObj.opsTrains=trains.filter(x=>!x.hidden||showT.includes(x.type.name)||kaiso(x));
     const rname=fallbackName||rosen.Rosenmei;
-    diaObj.runRef=diaObj.trains;   // 駅間所要時間は分割前の全列車から求める
+    diaObj.runRef=trains.filter(x=>!x.hidden);   // 駅間所要時間は分割前の全列車から求める
     const spl=SPLIT_RULES[rname]; if(spl){ diaObj.trains=diaObj.trains.filter(spl); diaObj.opsTrains=diaObj.opsTrains.filter(spl); }
     const exr=EXCLUDE_RULES[rname]; if(exr){ diaObj.trains=diaObj.trains.filter(x=>!exr(diaObj,x)); diaObj.opsTrains=diaObj.opsTrains.filter(x=>!exr(diaObj,x)); }
     // 運用番号が無い列車は全画面で表示しない
